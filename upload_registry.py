@@ -53,30 +53,37 @@ def is_in_registry(email):
     return norm in load_registry()
 
 
-def is_truly_first_upload(email, upload_date, old_db=None):
+def is_truly_first_upload(email, upload_date, old_db=None, upload_registry=None):
     """
     Returns (is_first, reason).
     
-    Rules:
-      1. Already in our registry      -> REPEAT (already counted before)
-      2. No upload date               -> FIRST (default conservative)
-      3. Email NOT in old DB          -> FIRST (brand new user)
-      4. Email in old DB:
-         - Same month/year as signup  -> FIRST (legitimate)
-         - Different month/year       -> REPEAT (re-upload after delete)
+        Rules:
+            1. Already in our registry      -> REPEAT (already counted before)
+            2. No upload date               -> NOT_DETERMINED (cannot safely count)
+            3. Email NOT in old DB          -> FIRST (brand new user)
+            4. Email in old DB:
+                 - Any prior known date before upload -> REPEAT
+                 - Known date exactly on upload date -> FIRST
+                 - No prior dates before upload    -> FIRST
     """
     norm = normalize_email(email)
     if not norm:
         return True, "no_email_skip_check"
     
-    # Check our local registry first - prevents double-counting same upload
-    registry = load_registry()
+    # Check our local registry for trusted first-upload records only.
+    registry = upload_registry if upload_registry is not None else load_registry()
     if norm in registry:
-        first_seen = registry[norm].get("first_seen", "?")
-        return False, f"already_counted_in_registry_on_{first_seen}"
+        entry = registry[norm]
+        source = entry.get("source", "")
+        trusted_sources = {"first_upload", "live_scrape", "manual_first_upload"}
+        if source in trusted_sources:
+            first_seen = entry.get("first_seen", "?")
+            if upload_date and upload_date == first_seen:
+                return False, f"already_counted_today_{first_seen}"
+            return False, f"already_counted_in_registry_on_{first_seen}"
     
     if not upload_date:
-        return True, "no_upload_date_default_first"
+        return False, "no_upload_date_cannot_determine"
     
     if old_db is None:
         old_db = {}
@@ -85,22 +92,19 @@ def is_truly_first_upload(email, upload_date, old_db=None):
         return True, "not_in_old_db_brand_new_user"
     
     entry = old_db[norm]
-    signup_date = entry.get("earliest", "")
-    
-    if not signup_date or signup_date == "__no_date__":
-        return True, "in_old_db_but_no_signup_date_default_first"
-    
-    # Compare months
-    try:
-        signup_month = signup_date[:7]    # YYYY-MM
-        upload_month = upload_date[:7]    # YYYY-MM
-        
-        if signup_month == upload_month:
-            return True, f"same_month_signup_and_upload_{signup_month}"
-        else:
-            return False, f"signup_{signup_month}_vs_upload_{upload_month}_different_months"
-    except Exception as e:
-        return True, f"month_compare_error:{e}"
+    dates = [d for d in entry.get("dates", []) if d and d != "__no_date__"]
+    if not dates:
+        return False, "in_old_db_but_no_dates_cannot_determine"
+
+    earlier_dates = sorted([d for d in dates if d < upload_date])
+    if earlier_dates:
+        return False, f"prior_date_{earlier_dates[0]}_before_upload_{upload_date}"
+
+    if upload_date in dates:
+        return True, f"same_date_known_email_{upload_date}"
+
+    # No known prior dates; this looks like the first upload for this email.
+    return True, f"no_prior_dates_before_upload_{upload_date}"
 
 
 def record_first_upload(email, upload_date, reason=""):
@@ -123,7 +127,7 @@ def record_first_upload(email, upload_date, reason=""):
         "added_at": datetime.now().isoformat(),
         "all_dates_observed": [upload_date] if upload_date else [],
         "reason_accepted": reason,
-        "source": "live_scrape",
+        "source": "first_upload",
     }
     save_registry(registry)
     return True

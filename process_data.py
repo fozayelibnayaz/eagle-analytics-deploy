@@ -211,17 +211,21 @@ def categorize_upload_row(row, check_dns, old_db, seen_in_batch, upload_history=
         return {"final_status": "REJECTED", "category": "DUPLICATE_IN_BATCH",
                 "reason": "same email in this scrape", "email": email}
 
-    # Use upload history (one-way ratchet) only to detect already-counted uploads.
-    # Do NOT pass the upload registry as the `old_db` to is_truly_first_upload;
-    # that function expects the historical signups DB for month comparisons.
-    is_first, reason = is_truly_first_upload(normalized, upload_date, old_db)
+    # Use upload history (one-way ratchet). Prefer the passed-in upload_history
+    # registry if provided, otherwise fall back to the old_db registry lookup.
+    if not upload_date:
+        return {"final_status": "REJECTED", "category": "NOT_DETERMINED",
+                "reason": "missing upload date", "email": email, "scraped_date": upload_date}
+
+    is_first, reason = is_truly_first_upload(normalized, upload_date, old_db, upload_registry=upload_history)
 
     # If history says this was already counted today, accept it (idempotent).
     if not is_first:
         if reason.startswith("already_counted_today"):
             in_old_db = "yes" if normalized in old_db else "no"
             return {"final_status": "ACCEPTED", "category": "ACCEPTED",
-                    "reason": reason, "email": email, "in_old_db": in_old_db, "scraped_date": upload_date}
+                    "reason": reason, "email": email, "in_old_db": in_old_db,
+                    "scraped_date": upload_date, "row_date_used": upload_date}
         category = "NOT_DETERMINED" if reason.startswith("not_determined") else "REPEAT_UPLOAD"
         return {"final_status": "REJECTED", "category": category,
                 "reason": reason, "email": email, "scraped_date": upload_date}
@@ -232,7 +236,8 @@ def categorize_upload_row(row, check_dns, old_db, seen_in_batch, upload_history=
     in_old_db = "yes" if normalized in old_db else "no"
     return {"final_status": "ACCEPTED", "category": "ACCEPTED",
             "reason": reason, "email": email,
-            "in_old_db": in_old_db, "scraped_date": upload_date}
+            "in_old_db": in_old_db, "scraped_date": upload_date,
+            "row_date_used": upload_date}
 
 
 def process_tab(raw_tab, verified_tab, source_type, old_db, check_dns=True, upload_history=None):

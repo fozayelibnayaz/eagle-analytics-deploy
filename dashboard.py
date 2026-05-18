@@ -730,6 +730,13 @@ elif page == "🔍 Browse Data":
             if browse_range and date_col and date_col in filt.columns:
                 filt = filter_df_by_date_range(filt, date_col, browse_range)
 
+            if date_col and date_col in filt.columns:
+                try:
+                    filt[date_col] = pd.to_datetime(filt[date_col], errors='coerce')
+                    filt = filt.sort_values(date_col, ascending=False)
+                except Exception:
+                    filt = filt.sort_values(date_col, ascending=False)
+
             if search:
                 mask = pd.Series([False] * len(filt), index=filt.index)
                 for col in filt.columns:
@@ -891,16 +898,6 @@ else:
                 with open('monthly_goals.json', 'w', encoding='utf-8') as wf:
                     json.dump(mg, wf, indent=2)
                 st.success(f"Saved goals for {month_sel}")
-                # Clear cached data and force a recompute so the dashboard reflects new goals
-                try:
-                    st.cache_data.clear()
-                except Exception:
-                    pass
-                try:
-                    st.experimental_rerun()
-                except Exception:
-                    # fallback to rerun
-                    st.rerun()
             except Exception as e:
                 st.error(f"Failed to save goals: {e}")
 
@@ -948,57 +945,6 @@ else:
                 "Goal": current_goals.get(metric, "N/A"),
             })
         st.dataframe(pd.DataFrame(forecast_rows), hide_index=True)
-
-    # ── Validation Panel: show which columns/data sources were used and predictor internals
-    st.divider()
-    st.markdown("### 🔎 Validation Panel — Why forecasts look the way they do")
-    v1, v2 = st.columns([2,3])
-    with v1:
-        # Data source indicator
-        source_label = "Google Sheets" if MASTER_SHEET_URL else "CSV fallback"
-        st.write("**Data source:**", source_label)
-        st.write("**Daily_Counts rows:**", len(daily) if daily is not None else 0)
-        st.write("**Verified_FREE rows:**", len(free) if free is not None else 0)
-        st.write("**Verified_FIRST_UPLOAD rows:**", len(upload) if upload is not None else 0)
-        st.write("**Verified_STRIPE rows:**", len(stripe) if stripe is not None else 0)
-        st.write("**Detected Daily_Counts columns:**")
-        st.write(f"SignUps -> `{signups_col}`\nFirstUploads -> `{uploads_col}`\nPaidSubscribers -> `{paid_col}`")
-        if st.button("Reload & Recompute"):
-            try:
-                st.cache_data.clear()
-            except Exception:
-                pass
-            try:
-                st.experimental_rerun()
-            except Exception:
-                st.rerun()
-
-    with v2:
-        st.write("**Predictor internals (per metric)**")
-        try:
-            # Display internals in a readable table
-            internals = []
-            for m in ["SignUps", "FirstUploads", "Paid"]:
-                r = forecast.get(m, {})
-                internals.append({
-                    "Metric": m,
-                    "Used Column": r.get("used_column", "?"),
-                    "Avg/day": r.get("avg_daily", 0),
-                    "Min/day": r.get("min_daily", 0),
-                    "Max/day": r.get("max_daily", 0),
-                    "Remaining days": r.get("remaining_days", "?"),
-                    "Reason": r.get("reason", ""),
-                })
-            st.dataframe(pd.DataFrame(internals), hide_index=True)
-        except Exception as e:
-            st.error(f"Failed to render internals: {e}")
-
-        st.write("**Revenue diagnostics**")
-        try:
-            rev = revenue_forecast(current_month)
-            st.json(rev)
-        except Exception as e:
-            st.write(f"Revenue diagnostic failed: {e}")
 
     # ── Momentum and Anomaly Alerts ──
     st.divider()
