@@ -295,34 +295,10 @@ def n_accepted_current_month(df, date_field):
     def in_current_month(val):
         if not val or str(val).strip() in ("", "—", "-", "nan"):
             return False
-        s = str(val).strip()
-        # Try YYYY-MM-DD format first
-        if s.startswith(current_month):
-            return True
-        # Try MM/DD/YY or MM/DD/YYYY (Stripe)
-=======
-    for fmt in DATE_FORMATS:
->>>>>>> 3afbacd (Fix: date-range-aware cards, correct column names, first-upload logic, ACCEPTED-only counting)
-        try:
-            return datetime.strptime(raw, fmt).date()
-        except Exception:
-            continue
-    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", raw)
-    if m:
-        try:
-            return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))).date()
-        except Exception:
-            pass
-    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", raw)
-    if m:
-        try:
-            mo, day, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            if yr < 100:
-                yr += 2000
-            return datetime(yr, mo, day).date()
-        except Exception:
-            pass
-    return None
+        parsed = parse_to_date(val)
+        if parsed is None:
+            return False
+        return parsed.strftime("%Y-%m") == current_month
 
 
 # ─── DATE RANGE ──────────────────────────────────────────────────
