@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 
 import streamlit as st
 import pandas as pd
+from ml_intelligence import predict_monthly_metrics, cohort_conversion_by_month, revenue_forecast
 import plotly.express as px
 import gspread
 import requests
@@ -816,11 +817,12 @@ else:
     current_goal_uploads = current_goals.get("FirstUploads") or None
     current_goal_paid = current_goals.get("Paid") or None
 
-    # ── Period totals (from daily_filtered → SUM) ──
+    # ── Forecast and Cohorts ──
     sum_signups = int(daily_filtered["_signups"].sum())
     sum_uploads = int(daily_filtered["_uploads"].sum())
     sum_paid    = int(daily_filtered["_paid"].sum())
 
+    forecast = predict_monthly_metrics(current_month)
     # ── Period label for cards ──
     if date_range:
         period_label = preset
@@ -896,6 +898,7 @@ else:
     # ── Goal & Forecast Insights for this month ──
     st.divider()
     st.markdown("### 🎯 Monthly Goal & Forecast Insights")
+    forecast_rows = []
     status_signups = goal_status_text(sum_signups, forecast.get("SignUps", {}).get("likely", 0), current_goal_signups)
     status_uploads = goal_status_text(sum_uploads, forecast.get("FirstUploads", {}).get("likely", 0), current_goal_uploads)
     status_paid = goal_status_text(sum_paid, forecast.get("Paid", {}).get("likely", 0), current_goal_paid)
@@ -957,6 +960,16 @@ else:
         card("Paid Momentum", f"{momentum_paid}%", "#9a3412",
              "vs prior period")
 
+    for metric in ["SignUps", "FirstUploads", "Paid"]:
+        row = forecast.get(metric, {})
+        forecast_rows.append({
+            "Metric": metric,
+            "Worst": row.get("worst", 0),
+            "Likely": row.get("likely", 0),
+            "Best": row.get("best", 0),
+            "Goal": current_goals.get(metric, "N/A"),
+        })
+    st.dataframe(pd.DataFrame(forecast_rows), hide_index=True)
     alert_text = []
     for metric_name, alerts in [("Sign-ups", a_signups), ("First Uploads", a_uploads), ("Paid", a_paid)]:
         if alerts:
