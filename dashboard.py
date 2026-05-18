@@ -842,6 +842,57 @@ else:
         card("Paid Subscribers", sum_paid, "#f97316",
              f"{period_label.lower()} · active")
 
+    # ══════════════════════════════════════════════
+    #  AI FEATURES PANEL — quick access to the 5 feature categories
+    # ══════════════════════════════════════════════
+    st.divider()
+    st.markdown("### 🤝 AI Features — Quick Access")
+    fcard1, fcard2, fcard3, fcard4, fcard5 = st.columns([2,2,2,2,2])
+    with fcard1:
+        card("Goals & Forecasts", "Active", "#2563eb",
+             "Monthly goals, best/likely/worst forecasts")
+    with fcard2:
+        card("Momentum & Alerts", "Active", "#0f766e",
+             "Trend momentum + recent anomalies")
+    with fcard3:
+        card("Cohort Analysis", "Planned", "#7c3aed",
+             "Cohorts by signup funnel (stub)")
+    with fcard4:
+        card("Revenue Forecasting", "Planned", "#d946ef",
+             "Project MRR / LTV scenarios (stub)")
+    with fcard5:
+        card("Automated Agents", "Planned", "#ea580c",
+             "Automated alerts / Slack/email agents (stub)")
+
+    # Offer a detailed panel / editor for goals
+    with st.expander("Manage Monthly Goals / Forecast Details", expanded=False):
+        # Month selector
+        month_sel = st.selectbox("Select month (YYYY-MM):", 
+                                 sorted(set(daily["_dt"].astype(str).apply(lambda d: d[:7]).unique().tolist() + [datetime.now().strftime("%Y-%m")])) ,
+                                 index=0)
+
+        mg = load_monthly_goals()
+        current = mg.get(month_sel, {}) if mg else {}
+
+        colA, colB, colC = st.columns(3)
+        with colA:
+            input_signups = st.number_input("SignUps goal", min_value=0, value=int(current.get("SignUps") or 0), step=1)
+        with colB:
+            input_uploads = st.number_input("FirstUploads goal", min_value=0, value=int(current.get("FirstUploads") or 0), step=1)
+        with colC:
+            input_paid = st.number_input("Paid goal", min_value=0, value=int(current.get("Paid") or 0), step=1)
+
+        if st.button("Save Goals"):
+            try:
+                mg = mg or {}
+                mg[month_sel] = {"SignUps": int(input_signups), "FirstUploads": int(input_uploads), "Paid": int(input_paid)}
+                with open('monthly_goals.json', 'w', encoding='utf-8') as wf:
+                    json.dump(mg, wf, indent=2)
+                st.success(f"Saved goals for {month_sel}")
+            except Exception as e:
+                st.error(f"Failed to save goals: {e}")
+
+
     # ── Goal & Forecast Insights for this month ──
     st.divider()
     st.markdown("### 🎯 Monthly Goal & Forecast Insights")
