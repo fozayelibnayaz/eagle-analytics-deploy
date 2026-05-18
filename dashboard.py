@@ -464,6 +464,79 @@ def count_accepted_in_range(df, date_field, date_range):
     return len(filtered)
 
 
+def load_monthly_goals(path="monthly_goals.json"):
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+def goal_status_text(current, likely, goal):
+    if goal is None or goal <= 0:
+        return "Goal not set"
+    if current >= goal:
+        return "ACHIEVED"
+    if likely >= goal:
+        return "On track"
+    if likely >= goal * 0.9:
+        return "Caution"
+    return "At risk"
+
+
+def goal_confidence_score(current, likely, goal):
+    if goal is None or goal <= 0:
+        return 0.5
+    base = current / goal
+    extra = (likely - current) / goal if goal else 0
+    score = base * 0.7 + min(max(extra, 0), 1.0) * 0.3
+    return min(max(score, 0.0), 1.0)
+
+
+def compute_momentum(df, col, lookback_days=14):
+    if col not in df.columns or df.empty:
+        return 0.0
+    window = df[["_dt", col]].dropna().sort_values("_dt")
+    if len(window) < 2:
+        return 0.0
+    window = window.tail(lookback_days)
+    half = len(window) // 2
+    if half < 1:
+        return 0.0
+    first = int(window.iloc[:half][col].sum())
+    second = int(window.iloc[half:][col].sum())
+    if first == 0:
+        return 100.0 if second > 0 else 0.0
+    return round((second - first) / first * 100.0, 1)
+
+
+def detect_recent_anomalies(df, col, lookback_days=14, threshold=2.0):
+    if col not in df.columns or df.empty:
+        return []
+    series = df[["_dt", col]].dropna().sort_values("_dt")
+    if len(series) < lookback_days + 1:
+        return []
+    recent = series.tail(lookback_days + 1).reset_index(drop=True)
+    baseline = recent.iloc[:-1][col].astype(float)
+    latest = float(recent.iloc[-1][col])
+    mean = baseline.mean() if len(baseline) else 0.0
+    std = baseline.std(ddof=0) if len(baseline) else 0.0
+    if std < 0.5:
+        std = 0.5
+    z = (latest - mean) / std
+    if abs(z) >= threshold:
+        return [{
+            "metric": col,
+            "value": int(latest),
+            "mean": round(mean, 1),
+            "z_score": round(z, 2),
+            "direction": "up" if z > 0 else "down",
+        }]
+    return []
+
+
 # ════════════════════════════════════════════════════════════════
 #  SIDEBAR
 # ════════════════════════════════════════════════════════════════
@@ -697,14 +770,16 @@ else:
         st.error("Daily_Counts not yet populated. Run the pipeline first.")
         st.stop()
 
-    # ── Validate required columns ──
-    required_cols = ["SignUps_Accepted", "FirstUploads_Accepted", "PaidSubscribers_Accepted"]
-    missing = [c for c in required_cols if c not in daily.columns]
-    if missing:
-        st.error(f"Daily_Counts missing columns: {missing}. Re-run pipeline.")
+    # ── Validate required columns with fallbacks for older sheet formats ──
+    signups_col = next((c for c in ["SignUps_Accepted", "SignUps"] if c in daily.columns), None)
+    uploads_col = next((c for c in ["FirstUploads_Accepted", "FirstUploads"] if c in daily.columns), None)
+    paid_col = next((c for c in ["PaidSubscribers_Accepted", "PaidSubscribers"] if c in daily.columns), None)
+    missing = [name for name, col in [("SignUps", signups_col), ("FirstUploads", uploads_col), ("PaidSubscribers", paid_col)] if col is None]
+    if signups_col is None or uploads_col is None or paid_col is None:
+        st.error("Daily_Counts must include SignUps, FirstUploads, and PaidSubscribers columns. Re-run pipeline.")
         st.stop()
 
-    st.caption(f"Data source columns: {', '.join(required_cols)}")
+    st.caption(f"Data source columns: {', '.join([c for c in [signups_col, uploads_col, paid_col] if c])}")
 
     # ── Build _dt column ──
     if "Date" in daily.columns:
@@ -724,9 +799,22 @@ else:
         daily_filtered = daily.copy()
 
     # ── Integer columns ──
-    daily_filtered["_signups"] = safe_int_col(daily_filtered, "SignUps_Accepted")
-    daily_filtered["_uploads"] = safe_int_col(daily_filtered, "FirstUploads_Accepted")
-    daily_filtered["_paid"]    = safe_int_col(daily_filtered, "PaidSubscribers_Accepted")
+    daily_filtered["_signups"] = safe_int_col(daily_filtered, signups_col)
+    daily_filtered["_uploads"] = safe_int_col(daily_filtered, uploads_col)
+    daily_filtered["_paid"]    = safe_int_col(daily_filtered, paid_col)
+
+    # Load monthly goals and forecast insights for current month
+    monthly_goals = load_monthly_goals()
+    current_month = datetime.now().strftime("%Y-%m")
+    try:
+        from ml_intelligence import predict_monthly_metrics
+        forecast = predict_monthly_metrics(current_month)
+    except Exception:
+        forecast = {}
+    current_goals = monthly_goals.get(current_month, {})
+    current_goal_signups = current_goals.get("SignUps") or None
+    current_goal_uploads = current_goals.get("FirstUploads") or None
+    current_goal_paid = current_goals.get("Paid") or None
 
     # ── Period totals (from daily_filtered → SUM) ──
     sum_signups = int(daily_filtered["_signups"].sum())
@@ -754,6 +842,81 @@ else:
         card("Paid Subscribers", sum_paid, "#f97316",
              f"{period_label.lower()} · active")
 
+    # ── Goal & Forecast Insights for this month ──
+    st.divider()
+    st.markdown("### 🎯 Monthly Goal & Forecast Insights")
+    status_signups = goal_status_text(sum_signups, forecast.get("SignUps", {}).get("likely", 0), current_goal_signups)
+    status_uploads = goal_status_text(sum_uploads, forecast.get("FirstUploads", {}).get("likely", 0), current_goal_uploads)
+    status_paid = goal_status_text(sum_paid, forecast.get("Paid", {}).get("likely", 0), current_goal_paid)
+
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        card("Sign-ups Goal", f"{current_goal_signups or 'N/A'}", "#2563eb",
+             f"{status_signups}")
+    with s2:
+        card("First Upload Goal", f"{current_goal_uploads or 'N/A'}", "#15803d",
+             f"{status_uploads}")
+    with s3:
+        card("Paid Goal", f"{current_goal_paid or 'N/A'}", "#c2410c",
+             f"{status_paid}")
+
+    score_signups = int(goal_confidence_score(sum_signups, forecast.get("SignUps", {}).get("likely", 0), current_goal_signups) * 100)
+    score_uploads = int(goal_confidence_score(sum_uploads, forecast.get("FirstUploads", {}).get("likely", 0), current_goal_uploads) * 100)
+    score_paid = int(goal_confidence_score(sum_paid, forecast.get("Paid", {}).get("likely", 0), current_goal_paid) * 100)
+
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        st.metric("Sign-ups Confidence", f"{score_signups}%", delta="Based on trend")
+    with f2:
+        st.metric("Upload Confidence", f"{score_uploads}%", delta="Based on trend")
+    with f3:
+        st.metric("Paid Confidence", f"{score_paid}%", delta="Based on trend")
+
+    if forecast:
+        forecast_rows = []
+        for metric in ["SignUps", "FirstUploads", "Paid"]:
+            row = forecast.get(metric, {})
+            forecast_rows.append({
+                "Metric": metric,
+                "Worst": row.get("worst", 0),
+                "Likely": row.get("likely", 0),
+                "Best": row.get("best", 0),
+                "Goal": current_goals.get(metric, "N/A"),
+            })
+        st.dataframe(pd.DataFrame(forecast_rows), hide_index=True)
+
+    # ── Momentum and Anomaly Alerts ──
+    st.divider()
+    st.markdown("### 🤖 AI Trend & Quality Alerts")
+    momentum_signups = compute_momentum(daily_filtered, "_signups")
+    momentum_uploads = compute_momentum(daily_filtered, "_uploads")
+    momentum_paid = compute_momentum(daily_filtered, "_paid")
+    a_signups = detect_recent_anomalies(daily_filtered, "_signups")
+    a_uploads = detect_recent_anomalies(daily_filtered, "_uploads")
+    a_paid = detect_recent_anomalies(daily_filtered, "_paid")
+
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        card("Sign-ups Momentum", f"{momentum_signups}%", "#2563eb",
+             "vs prior period")
+    with m2:
+        card("Upload Momentum", f"{momentum_uploads}%", "#0f766e",
+             "vs prior period")
+    with m3:
+        card("Paid Momentum", f"{momentum_paid}%", "#9a3412",
+             "vs prior period")
+
+    alert_text = []
+    for metric_name, alerts in [("Sign-ups", a_signups), ("First Uploads", a_uploads), ("Paid", a_paid)]:
+        if alerts:
+            for item in alerts:
+                alert_text.append(f"{metric_name}: {item['direction'].upper()} anomaly - {item['value']} vs mean {item['mean']} (z={item['z_score']})")
+    if alert_text:
+        for line in alert_text:
+            st.warning(line)
+    else:
+        st.success("No major anomalies detected in recent KPI trends.")
+
     st.divider()
 
     # ══════════════════════════════════════════════
@@ -761,9 +924,9 @@ else:
     # ══════════════════════════════════════════════
     today = datetime.now().date()
     today_row = daily[daily["_dt"] == today]
-    today_s = int(safe_int_col(today_row, "SignUps_Accepted").sum())
-    today_u = int(safe_int_col(today_row, "FirstUploads_Accepted").sum())
-    today_p = int(safe_int_col(today_row, "PaidSubscribers_Accepted").sum())
+    today_s = int(safe_int_col(today_row, signups_col).sum())
+    today_u = int(safe_int_col(today_row, uploads_col).sum())
+    today_p = int(safe_int_col(today_row, paid_col).sum())
 
     st.markdown("### 🔴 Live Snapshot (today)")
     l1, l2, l3 = st.columns(3)

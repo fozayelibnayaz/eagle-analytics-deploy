@@ -89,8 +89,22 @@ def get_summary_text() -> str:
                 best = pred.get(metric, {}).get('best', 0)
                 likely = pred.get(metric, {}).get('likely', 0)
                 worst = pred.get(metric, {}).get('worst', 0)
-                goal = g.get(metric, '') if g else ''
-                lines.append(f"  {metric:12s} | current={cur:>3} | likely={likely:>3} | best={best:>3} | worst={worst:>3} | goal={goal}")
+                goal = g.get(metric, None) if g else None
+                goal_str = str(goal) if goal else 'N/A'
+                if goal and goal > 0:
+                    if cur >= goal:
+                        status = 'ACHIEVED'
+                    elif likely >= goal:
+                        status = 'ON TRACK'
+                    elif likely >= goal * 0.9:
+                        status = 'CAUTION'
+                    else:
+                        status = 'AT RISK'
+                else:
+                    status = 'NO GOAL SET'
+                lines.append(
+                    f"  {metric:12s} | current={cur:>3} | likely={likely:>3} | best={best:>3} | worst={worst:>3} | goal={goal_str:>3} | {status}"
+                )
     except Exception as e:
         lines.append(f"(Prediction error: {e})")
 
