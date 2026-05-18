@@ -310,3 +310,93 @@ if __name__ == "__main__":
         print(f"\n{r['Email']}")
         print(f"  Legitimacy: {r['__ml_legitimacy_score__']}")
         print(f"  Conversion: {r['__ml_conversion_score__']}")
+
+
+# ─── Simple monthly predictor ─────────────────────────────────
+def predict_monthly_metrics(month: str, lookback_days: int = 30):
+    """Predict best/likely/worst for SignUps, FirstUploads, Paid for given month.
+    month: 'YYYY-MM' string
+    Returns dict {metric: {current, best, likely, worst, remaining_days, projected}}"""
+    from sheets_writer import read_tab_data
+    from datetime import datetime, date
+
+    daily = read_tab_data('Daily_Counts')
+    # metrics column mapping
+    metric_cols = {
+        'SignUps': 'SignUps_Accepted',
+        'FirstUploads': 'FirstUploads_Accepted',
+        'Paid': 'PaidSubscribers_Accepted'
+    }
+
+    # Parse month
+    try:
+        ym = datetime.strptime(month, '%Y-%m')
+    except Exception:
+        return {}
+
+    # current sum for month
+    month_rows = [r for r in daily if r.get('Date','').startswith(month)]
+    current = {m: sum(int(float(r.get(c,0) or 0)) for r in month_rows) for m,c in metric_cols.items()}
+
+    # build recent daily series (last lookback_days)
+    all_dates = sorted({r.get('Date') for r in daily if r.get('Date')})
+    recent_dates = [d for d in all_dates if d]
+    # take last lookback_days
+    recent = recent_dates[-lookback_days:] if len(recent_dates) >= lookback_days else recent_dates
+
+    stats = {}
+    for metric, col in metric_cols.items():
+        # daily values for recent days
+        vals = []
+        for d in recent:
+            rows = [r for r in daily if r.get('Date') == d]
+            val = 0
+            if rows:
+                val = int(float(rows[0].get(col,0) or 0))
+            vals.append(val)
+
+        if not vals:
+            avg = 0
+            mn = 0
+            mx = 0
+        else:
+            avg = sum(vals)/len(vals)
+            mn = min(vals)
+            mx = max(vals)
+
+        # days in target month
+        year = ym.year
+        month_idx = ym.month
+        # compute days in month
+        import calendar
+        days_in_month = calendar.monthrange(year, month_idx)[1]
+        # days elapsed so far in that month (based on today)
+        today = date.today()
+        if today.year == year and today.month == month_idx:
+            elapsed = today.day
+        else:
+            # if month in past, assume full month elapsed
+            elapsed = days_in_month
+
+        remaining = max(days_in_month - elapsed, 0)
+
+        # projected totals
+        # worst: assume remaining days will have min daily rate
+        worst_proj = current[metric] + int(mn * remaining)
+        # likely: use avg daily
+        likely_proj = current[metric] + int(avg * remaining)
+        # best: use max daily
+        best_proj = current[metric] + int(mx * remaining)
+
+        stats[metric] = {
+            'current': current[metric],
+            'best': best_proj,
+            'likely': likely_proj,
+            'worst': worst_proj,
+            'remaining_days': remaining,
+            'avg_daily': round(avg,2),
+            'min_daily': mn,
+            'max_daily': mx
+        }
+
+    return stats

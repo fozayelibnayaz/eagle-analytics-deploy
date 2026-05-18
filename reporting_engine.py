@@ -21,6 +21,7 @@ def log(msg):
 def get_summary_text() -> str:
     """Build summary text from latest pipeline data."""
     from sheets_writer import read_tab_data
+    from ml_intelligence import predict_monthly_metrics
     
     lines = []
     lines.append(f"Eagle3D KPI Pipeline Report")
@@ -70,6 +71,29 @@ def get_summary_text() -> str:
     except Exception as e:
         lines.append(f"  (error: {e})")
     
+    # Goals & Predictions for current month
+    try:
+        goals = {}
+        if os.path.exists('monthly_goals.json'):
+            with open('monthly_goals.json','r') as f:
+                goals = json.load(f)
+        # current month string
+        now_month = datetime.now().strftime('%Y-%m')
+        pred = predict_monthly_metrics(now_month)
+        if pred:
+            lines.append("")
+            lines.append(f"GOALS & PREDICTIONS ({now_month}):")
+            g = goals.get(now_month, {})
+            for metric in ('SignUps','FirstUploads','Paid'):
+                cur = pred.get(metric, {}).get('current', 0)
+                best = pred.get(metric, {}).get('best', 0)
+                likely = pred.get(metric, {}).get('likely', 0)
+                worst = pred.get(metric, {}).get('worst', 0)
+                goal = g.get(metric, '') if g else ''
+                lines.append(f"  {metric:12s} | current={cur:>3} | likely={likely:>3} | best={best:>3} | worst={worst:>3} | goal={goal}")
+    except Exception as e:
+        lines.append(f"(Prediction error: {e})")
+
     return "\n".join(lines)
 
 

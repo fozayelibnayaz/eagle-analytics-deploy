@@ -74,16 +74,54 @@ def parse_amount(val):
 
 
 def categorize_stripe_row(row):
-    """STRIPE: only checks total spend > 0."""
+    """STRIPE: only accept if Total spend > 0.
+    Prefer the 'First payment' date for attribution; if missing, fall back
+    to the customer 'Created' date. This ensures paid customers are counted
+    in the month they first paid when available, otherwise in their
+    account creation month as a fallback.
+    """
     email = get_email(row)
     spend_raw = row.get("Total spend", "") or row.get("total_spend", "")
     amount = parse_amount(spend_raw)
-    
+
+    # Only count this as a paid customer if Total Spend > 0.
     if amount > 0:
-        return {"final_status": "ACCEPTED", "category": "ACCEPTED",
-                "reason": f"paid ${amount:.2f}", "email": email, "amount": amount}
-    return {"final_status": "REJECTED", "category": "ZERO_SPEND",
-            "reason": "total spend $0 (not paid)", "email": email, "amount": 0.0}
+        # Prefer First payment, fall back to Created
+        first_payment_date = parse_date(row.get("First payment", ""))
+        created_date = parse_date(row.get("Created", ""))
+        row_date = first_payment_date or created_date
+        if row_date:
+            return {
+                "final_status": "ACCEPTED",
+                "category": "ACCEPTED",
+                "reason": f"paid_${amount:.2f}",
+                "email": email,
+                "amount": amount,
+                "scraped_date": row_date,
+                "row_date_used": row_date
+            }
+        else:
+            # Has spend but no usable date → reject for audit
+            return {
+                "final_status": "REJECTED",
+                "category": "NO_DATE",
+                "reason": "total_spend > 0 but no First payment or Created date",
+                "email": email,
+                "amount": amount,
+                "scraped_date": "",
+                "row_date_used": ""
+            }
+    else:
+        # Total spend is 0 or empty → not a paid customer
+        return {
+            "final_status": "REJECTED",
+            "category": "ZERO_SPEND",
+            "reason": "total_spend = $0 (not paid)",
+            "email": email,
+            "amount": 0.0,
+            "scraped_date": "",
+            "row_date_used": ""
+        }
 
 
 def categorize_signup_row(row, check_dns, old_db, seen_in_batch):
@@ -141,7 +179,7 @@ def categorize_signup_row(row, check_dns, old_db, seen_in_batch):
             "in_old_db": in_old_db, "scraped_date": scraped_date}
 
 
-def categorize_upload_row(row, check_dns, old_db, seen_in_batch, _ignored=None):
+def categorize_upload_row(row, check_dns, old_db, seen_in_batch, upload_history=None):
     """FIRST UPLOAD: validate + check using account-creation vs upload-date logic."""
     email = get_email(row)
     if not email:
@@ -168,27 +206,36 @@ def categorize_upload_row(row, check_dns, old_db, seen_in_batch, _ignored=None):
     
     upload_date = get_scraped_date(row, "FIRST_UPLOAD")
     normalized = normalize_email(email)
-    
+
     if normalized in seen_in_batch:
         return {"final_status": "REJECTED", "category": "DUPLICATE_IN_BATCH",
                 "reason": "same email in this scrape", "email": email}
-    
-    # Use account-creation vs upload-date comparison via old_db
-    is_first, reason = is_truly_first_upload(normalized, upload_date, old_db)
+
+    # Use upload history (one-way ratchet). Prefer the passed-in upload_history
+    # registry if provided, otherwise fall back to the old_db registry lookup.
+    history_source = upload_history if upload_history is not None else old_db
+    is_first, reason = is_truly_first_upload(normalized, upload_date, history_source)
+
+    # If history says this was already counted today, accept it (idempotent).
     if not is_first:
-        return {"final_status": "REJECTED", "category": "REPEAT_UPLOAD",
+        if reason.startswith("already_counted_today"):
+            in_old_db = "yes" if normalized in old_db else "no"
+            return {"final_status": "ACCEPTED", "category": "ACCEPTED",
+                    "reason": reason, "email": email, "in_old_db": in_old_db, "scraped_date": upload_date}
+        category = "NOT_DETERMINED" if reason.startswith("not_determined") else "REPEAT_UPLOAD"
+        return {"final_status": "REJECTED", "category": category,
                 "reason": reason, "email": email, "scraped_date": upload_date}
-    
+
     # Record this in registry to prevent double-counting on future runs
     record_first_upload(normalized, upload_date, reason)
-    
+
     in_old_db = "yes" if normalized in old_db else "no"
     return {"final_status": "ACCEPTED", "category": "ACCEPTED",
             "reason": reason, "email": email,
             "in_old_db": in_old_db, "scraped_date": upload_date}
 
 
-def process_tab(raw_tab, verified_tab, source_type, old_db, check_dns=True):
+def process_tab(raw_tab, verified_tab, source_type, old_db, check_dns=True, upload_history=None):
     log("-" * 60)
     log(f"PROCESSING: {raw_tab} -> {verified_tab} (source={source_type})")
     
@@ -218,14 +265,14 @@ def process_tab(raw_tab, verified_tab, source_type, old_db, check_dns=True):
             categorized.append(enriched)
     
     elif source_type == "FIRST_UPLOAD":
-        registry = load_registry()
+        registry = upload_history if upload_history is not None else load_registry()
         if not registry:
             log("  Registry empty - running bootstrap...")
             registry = bootstrap_registry(force=False)
         log(f"  FIRST UPLOAD mode: registry has {len(registry)} known uploaders")
         
         for row in source:
-            cat = categorize_upload_row(row, check_dns, old_db, seen_in_batch)
+            cat = categorize_upload_row(row, check_dns, old_db, seen_in_batch, upload_history=registry)
             if cat["final_status"] == "ACCEPTED":
                 seen_in_batch.add(normalize_email(cat["email"]))
             enriched = build_enriched(row, cat, source_type)
@@ -283,6 +330,7 @@ def build_enriched(row, cat, source_type):
     enriched["__rejection_reason__"]  = cat.get("reason", "")
     enriched["__email_normalized__"]  = cat.get("email", "")
     enriched["__scraped_date__"]      = cat.get("scraped_date", "")
+    enriched["row_date_used"]         = cat.get("row_date_used", "")
     enriched["__processed_at__"]      = PROCESS_TS
     if source_type == "STRIPE":
         enriched["__amount__"] = cat.get("amount", 0.0)
@@ -320,10 +368,13 @@ def main():
     check_mx_for = {"Raw_FREE": True, "Raw_FIRST_UPLOAD": False, "Raw_STRIPE": False}
     
     results = []
+    # Load upload registry once and pass into processing to keep behavior deterministic
+    upload_history = load_registry()
     for raw_tab, verified_tab, source_type in TAB_MAP:
         try:
             r = process_tab(raw_tab, verified_tab, source_type, old_db,
-                            check_dns=check_mx_for.get(raw_tab, False))
+                            check_dns=check_mx_for.get(raw_tab, False),
+                            upload_history=upload_history)
             results.append(r)
         except Exception as e:
             log(f"Error processing {raw_tab}: {e}")
