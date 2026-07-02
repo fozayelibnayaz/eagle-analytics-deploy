@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-06-22T07:45:19.281828",
+  "results": {
+    "data_integrity": "WARN",
+    "overrides": "PASS",
+    "alltime_logic": "PASS",
+    "kpi_validation": "PASS",
+    "churn": "PASS",
+    "migration": "FILES_GENERATED"
+  }
+}

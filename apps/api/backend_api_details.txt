@@ -1,0 +1,27 @@
+API Base URL:
+http://192.168.0.168:8080
+
+API Key:
+e3d_87dloUy4P2DsC14F2xgXu_qnSa2xkFbTLqLhspdBab0
+
+Auth Header:
+X-API-Key: e3d_87dloUy4P2DsC14F2xgXu_qnSa2xkFbTLqLhspdBab0
+
+Main Sync Endpoint:
+POST http://192.168.0.168:8080/api/v1/sync/{collection_name}
+
+Alias Endpoint:
+POST http://192.168.0.168:8080/api/v1/dump/{collection_name}
+
+Health:
+GET http://192.168.0.168:8080/health
+
+Collections:
+GET http://192.168.0.168:8080/api/v1/collections
+
+Example:
+curl -X POST "http://192.168.0.168:8080/api/v1/sync/signups" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: e3d_87dloUy4P2DsC14F2xgXu_qnSa2xkFbTLqLhspdBab0" \
+  -d '{"mode":"upsert","conflict_fields":["email_normalized"],"records":[{"email_normalized":"test@example.com","signup_date":"2026-07-01","final_status":"ACCEPTED"}]}'
+

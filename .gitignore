@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+
+# Env/secrets
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+.streamlit/youtube_oauth.json
+.api_keys.json
+google_creds.json
+kpi_cookies.json
+stripe_cookies.json
+linkedin.json
+*storage_state*.json
+*cookie*.json
+
+# Generated / reports that may contain secrets
+_project_archive/
+_production_reports/
+_lead_qa_reports/
+_mongo_fix_reports/
+docs/final_verification/*.txt
+docs/secret_scan.txt
+eagle3d_database_export_*/
+stripe_session/
+code_audit_clean/
+code_audit_text_export/
+*.db
+.DS_Store

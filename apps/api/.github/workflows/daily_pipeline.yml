@@ -1,0 +1,281 @@
+name: Daily KPI Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_historical:
+        description: 'Force full historical re-scrape (true/false)'
+        required: false
+        default: 'false'
+  schedule:
+    - cron: '0 0 * * *'
+    - cron: '0 6 * * *'
+    - cron: '0 12 * * *'
+    - cron: '0 18 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-kpi-pipeline
+  cancel-in-progress: false
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ hashFiles('requirements-pipeline.txt') }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-pipeline.txt
+
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      - name: Restore Google credentials
+        env:
+          CREDS: ${{ secrets.GOOGLE_CREDS_JSON }}
+        run: |
+          if [ -z "$CREDS" ]; then
+            echo "GOOGLE_CREDS_JSON empty"
+            exit 1
+          fi
+          echo "$CREDS" > google_creds.json
+
+      - name: Show schedule context
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_COOKIES_JSON: ${{ secrets.STRIPE_COOKIES_JSON }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          LINKEDIN_COOKIES_JSON: ${{ secrets.LINKEDIN_COOKIES_JSON }}
+        run: |
+          echo "=== Pipeline Context ==="
+          NOW_UTC=$(date -u '+%Y-%m-%d %H:%M:%S')
+          echo "Triggered at UTC: $NOW_UTC"
+          REPORT_DATE=$(date -u -d '12 hours ago' '+%Y-%m-%d')
+          echo "Reporting on day: $REPORT_DATE"
+          echo ""
+          echo "=== Secret Availability ==="
+          if [ -n "$YOUTUBE_API_KEY" ]; then echo "YouTube API Key: SET"; else echo "YouTube API Key: NOT SET"; fi
+          if [ -n "$YOUTUBE_CHANNEL_ID" ]; then echo "YouTube Channel ID: SET"; else echo "YouTube Channel ID: NOT SET"; fi
+          if [ -n "$STRIPE_COOKIES_JSON" ]; then echo "Stripe Cookies: SET"; else echo "Stripe Cookies: NOT SET"; fi
+          if [ -n "$STRIPE_SECRET_KEY" ]; then echo "Stripe API Key: SET (optional)"; else echo "Stripe API Key: NOT SET (optional)"; fi
+          if [ -n "$GROQ_API_KEY" ]; then echo "Groq API Key: SET"; else echo "Groq API Key: NOT SET"; fi
+          if [ -n "$LINKEDIN_COOKIES_JSON" ]; then echo "LinkedIn Cookies: SET"; else echo "LinkedIn Cookies: NOT SET"; fi
+
+      - name: Login to KPI Dashboard
+        env:
+          KPI_EMAIL: ${{ secrets.KPI_EMAIL }}
+          KPI_PASSWORD: ${{ secrets.KPI_PASSWORD }}
+        run: |
+          if [ -z "$KPI_EMAIL" ] || [ -z "$KPI_PASSWORD" ]; then
+            echo "KPI_EMAIL or KPI_PASSWORD missing"
+            exit 1
+          fi
+          python3 firebase_login.py || echo "Storage state login failed - scrape_kpi.py fallback will handle"
+
+      - name: Restore Stripe cookies
+        env:
+          COOKIES: ${{ secrets.STRIPE_COOKIES_JSON }}
+        run: |
+          if [ -n "$COOKIES" ]; then
+            echo "$COOKIES" > stripe_cookies.json
+            echo "Stripe cookies restored"
+          fi
+
+      - name: Restore LinkedIn cookies
+        env:
+          COOKIES: ${{ secrets.LINKEDIN_COOKIES_JSON }}
+        run: |
+          if [ -n "$COOKIES" ]; then
+            echo "$COOKIES" > data_output/linkedin_cookies.json
+            # Also restore session state if provided
+            if [ -n "${{ secrets.LINKEDIN_SESSION_STATE }}" ]; then
+              echo "${{ secrets.LINKEDIN_SESSION_STATE }}" > data_output/linkedin_session_state.json
+              echo "LinkedIn session state restored"
+            fi
+            echo "LinkedIn cookies restored"
+          else
+            echo "LINKEDIN_COOKIES_JSON not set - public scrape only"
+          fi
+
+      - name: Install xvfb for Playwright headless
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb
+          # Start virtual display in background
+          Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+          sleep 2
+
+      - name: Run pipeline
+        env:
+          DISPLAY: ':99'
+
+          MASTER_SHEET_URL: ${{ secrets.MASTER_SHEET_URL }}
+          GOOGLE_CREDS_JSON: ${{ secrets.GOOGLE_CREDS_JSON }}
+          KPI_EMAIL: ${{ secrets.KPI_EMAIL }}
+          KPI_PASSWORD: ${{ secrets.KPI_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          HEADLESS_MODE: 'true'
+          FORCE_HISTORICAL: ${{ github.event.inputs.force_historical || 'false' }}
+          ENABLE_SMTP_VERIFY: '0'
+          REPORT_TZ: 'UTC'
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
+          YOUTUBE_OAUTH_TOKEN: ${{ secrets.YOUTUBE_OAUTH_TOKEN }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          LINKEDIN_COMPANY_PAGE: ${{ secrets.LINKEDIN_COMPANY_PAGE }}
+          LINKEDIN_COOKIES_JSON: ${{ secrets.LINKEDIN_COOKIES_JSON }}
+          GA4_PROPERTY_ID: '374525971'
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "=== Pipeline Start ==="
+          echo "SUPABASE_URL set: $([ -n "$SUPABASE_URL" ] && echo YES || echo NO)"
+          echo "SUPABASE_SERVICE_KEY set: $([ -n "$SUPABASE_SERVICE_KEY" ] && echo YES || echo NO)"
+          python3 daily_pipeline.py
+
+      - name: Show state files AFTER run
+        if: always()
+        run: |
+          ls -la data_output/ | head -40
+          echo ""
+          echo "=== Key data files ==="
+          for f in youtube_channel.json youtube_videos.json youtube_daily.json ga4_traffic_cache.json linkedin_metrics.json linkedin_daily.json linkedin_posts.json daily_counts.json; do
+            if [ -f "data_output/$f" ]; then
+              echo "  OK data_output/$f ($(wc -c < data_output/$f) bytes)"
+            else
+              echo "  MISSING data_output/$f"
+            fi
+          done
+
+      - name: Verify data freshness
+        if: always()
+        run: |
+          python3 << 'PYEOF'
+          from datetime import datetime, timedelta
+          from pathlib import Path
+          import json
+          utc_now = datetime.utcnow()
+          aoe_completed = (utc_now - timedelta(hours=12)).strftime('%Y-%m-%d')
+          print(f"UTC now: {utc_now.strftime('%Y-%m-%d %H:%M')}")
+          print(f"Reporting on: {aoe_completed}")
+          checks = {
+              "pipeline_health.json": lambda d: f"stages: {d.get('stages_passed', '?')}/{d.get('total_stages', '?')}",
+              "youtube_channel.json": lambda d: f"channel: {d.get('title', '?')}, subs: {d.get('subscribers', 0):,}",
+              "linkedin_metrics.json": lambda d: f"followers: {d.get('followers', 0):,}, posts: {len(d.get('posts', []))}",
+              "ga4_traffic_cache.json": lambda d: f"sessions: {d.get('total_sessions', 0):,}",
+          }
+          for fname, desc_fn in checks.items():
+              p = Path(f"data_output/{fname}")
+              if p.exists():
+                  try:
+                      data = json.loads(p.read_text())
+                      print(f"OK {fname}: {desc_fn(data)}")
+                  except Exception as e:
+                      print(f"WARN {fname}: parse error ({e})")
+              else:
+                  print(f"MISSING {fname}")
+          PYEOF
+
+      - name: Commit persistent state
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p data_output
+          for f in data_output/.historical_done data_output/.stripe_historical_done; do
+            if [ -f "$f" ]; then
+              git add -f "$f"
+            fi
+          done
+          for f in \
+            data_output/upload_history.json \
+            data_output/first_upload_ledger.json \
+            data_output/upload_registry.json \
+            data_output/historical_accounts.json \
+            data_output/historical_paid.json \
+            data_output/old_db_with_dates.json \
+            data_output/pipeline_health.json \
+            data_output/domain_cache.json \
+            data_output/smtp_cache.json \
+            data_output/manual_overrides.json \
+            data_output/youtube_cache.json \
+            data_output/youtube_videos.json \
+            data_output/youtube_analytics.json \
+            data_output/youtube_daily.json \
+            data_output/youtube_channel.json \
+            data_output/linkedin_metrics.json \
+            data_output/linkedin_posts.json \
+            data_output/linkedin_daily.json \
+            data_output/linkedin_followers.json \
+            data_output/ga4_traffic_cache.json \
+            data_output/daily_counts.json \
+            data_output/cross_platform_cache.json \
+            data_output/youtube_command_center.json \
+            data_output/customer_success_raw.json \
+            data_output/linkedin_full_analytics.json \
+            kpi_storage_state.json; do
+            if [ -f "$f" ]; then
+              git add -f "$f"
+            fi
+          done
+          if git diff --cached --quiet; then
+            echo "No state changes"
+          else
+            REPORT_DATE=$(date -u -d '12 hours ago' '+%Y-%m-%d')
+            git commit -m "Pipeline state - reporting day ${REPORT_DATE} (AoE) [skip ci]"
+            for i in 1 2 3; do
+              if git push origin main; then
+                echo "Pushed"
+                break
+              else
+                echo "Push $i failed, retrying..."
+                git pull --rebase origin main || true
+                sleep 3
+              fi
+            done
+          fi
+
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kpi-run-${{ github.run_number }}
+          path: |
+            data_output/*.csv
+            data_output/*.json
+            data_output/*.log
+            data_output/.historical_done
+            data_output/.stripe_historical_done
+          retention-days: 30
+          include-hidden-files: true

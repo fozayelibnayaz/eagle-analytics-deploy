@@ -1,0 +1,12 @@
+{
+  "name": "eagle-analytics-hub",
+  "private": true,
+  "scripts": {
+    "dev:web": "cd apps/web && npm run dev",
+    "build:web": "cd apps/web && npm run build",
+    "lint:web": "cd apps/web && npm run lint",
+    "dev:api": "cd apps/api && source venv/bin/activate && python3 -m uvicorn api_server:app --host 0.0.0.0 --port 8080",
+    "test:api": "cd apps/api && python3 -m py_compile api_server.py mongo_client.py mongo_data_loader.py",
+    "verify": "npm run lint:web && npm run build:web && npm run test:api"
+  }
+}

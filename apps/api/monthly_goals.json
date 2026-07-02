@@ -1,0 +1,13 @@
+{
+  "2025-07": {"SignUps": 90, "FirstUploads": 35, "Paid": 7},
+  "2025-08": {"SignUps": 85, "FirstUploads": 32, "Paid": 13},
+  "2025-09": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 10},
+  "2025-10": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 11},
+  "2025-11": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 9},
+  "2025-12": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 7},
+  "2026-01": {"SignUps": 76, "FirstUploads": 30, "Paid": 8},
+  "2026-02": {"SignUps": 93, "FirstUploads": 50, "Paid": 11},
+  "2026-03": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 5},
+  "2026-04": {"SignUps": 0,  "FirstUploads": 0,  "Paid": 11},
+  "2026-05": {"SignUps": 46, "FirstUploads": 14, "Paid": 5}
+}

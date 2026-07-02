@@ -1,0 +1,108 @@
+!data_output/cross_platform_cache.json
+!data_output/daily_counts.json
+!data_output/disposable_domains.txt
+!data_output/ga4_traffic_cache.json
+!data_output/linkedin_daily.json
+!data_output/linkedin_followers.json
+!data_output/linkedin_metrics.json
+!data_output/linkedin_posts.json
+!data_output/old_db_with_dates.json
+!data_output/pipeline_health.json
+!data_output/upload_history.json
+!data_output/upload_registry.json
+!data_output/youtube_analytics.json
+!data_output/youtube_cache.json
+!data_output/youtube_channel.json
+!data_output/youtube_daily.json
+!data_output/youtube_videos.json
+# Backup files (auto-managed)
+# Backup files and safe folder
+# GA4 / Traffic Intelligence
+# IDE
+# KEEP these state files committed (force-include):
+# Local data outputs - don't commit large files
+# Local secrets (NEVER commit)
+# Markers (regenerated each run)
+# Python
+# YouTube data files (force-include)
+*.MOVED
+*.backup_*
+*.emoji_fix_*
+*.fix_*
+*.full_patch_backup_*
+*.oauth.json
+*.pyc
+*.qa_backup_*
+*.responsive_backup_*
+*.tablist_backup_*
+.DS_Store
+.idea/
+.streamlit/secrets.toml
+.streamlit/youtube_oauth.json
+.venv/
+.vscode/
+__pycache__/
+_build_ti_page.py
+_deploy_backup_*
+_safe_backup/
+browser_session/
+browser_session_fresh/
+browser_session_new/
+dashboard.py.backup_*
+data_output/*.csv
+data_output/*.html
+data_output/*.log
+data_output/*.png
+data_output/*.txt
+data_output/.historical_done
+data_output/.stripe_historical_done
+data_output/Daily_Counts.*
+data_output/Duplicates_*
+data_output/Monthly_Counts.*
+data_output/Raw_*
+data_output/Raw_FREE_TEST.*
+data_output/Raw_TEST.*
+data_output/Rejected_*
+data_output/Skipped_*
+data_output/Verified_*
+data_output/linkedin_cookies.json
+data_output/storage_state_debug.json
+deploy_traffic_intelligence.sh
+google_creds.json
+kpi_cookies.json
+kpi_storage_dump.json
+kpi_storage_state.json
+pages/*.backup_*
+pages/*.emoji_fix_*
+pages/*.fix_*
+pages/*.full_patch_backup_*
+pages/*.qa_backup_*
+pages/*.responsive_backup_*
+pages/*.tablist_backup_*
+requirements_ga4.txt
+restore_data.py
+streamlit_secrets_PASTE_THIS.toml
+stripe_cookies.json
+stripe_session/
+stripe_storage_state.json
+venv/
+
+# Local secrets / generated data
+linkedin.json
+linkedin_cookies*.json
+*_storage_state.json
+eagle3d_mongo_export/
+code_audit_clean/
+code_audit_text_export/
+_mongo_fix_backup_*/
+_mongo_fix_reports/
+data/*.db
+data_output/*.json
+data_output/*.pkl
+data_output/*.xlsx
+
+_project_archive/
+_production_reports/
+.api_keys.json
+
+api_ingest_log.jsonl

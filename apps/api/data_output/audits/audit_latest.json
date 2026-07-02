@@ -1,0 +1,208 @@
+{
+  "generated_at": "2026-06-22T07:45:16.198448",
+  "metrics": {
+    "signups": {
+      "raw_count": 3032,
+      "accepted": 3032,
+      "rejected": 0,
+      "manual_override": "N/A \u2014 check override_log.json",
+      "displayed": 3032,
+      "difference": 0,
+      "validation_status": "PASS \u2014 but coverage starts 2024-01",
+      "coverage_start": "2024-01-17",
+      "coverage_end": "2026-06-19"
+    },
+    "uploads": {
+      "raw_count": 101,
+      "accepted": 101,
+      "rejected": 0,
+      "manual_override": "N/A \u2014 check override_log.json",
+      "displayed": 101,
+      "difference": 0,
+      "validation_status": "WARNING \u2014 coverage only starts Dec 2025. Cannot compare to 2024 signups.",
+      "coverage_start": "2025-12-03",
+      "coverage_end": "2026-06-18"
+    },
+    "paid": {
+      "raw_count": 432,
+      "accepted": 432,
+      "rejected": 0,
+      "manual_override": "N/A \u2014 check override_log.json",
+      "displayed": 432,
+      "difference": 0,
+      "validation_status": "WARNING \u2014 5 days where paid > signups (historical data mismatch)",
+      "coverage_start": "2024-01-17",
+      "coverage_end": "2026-06-17",
+      "impossible_days": [
+        {
+          "date": "2024-01-17",
+          "signups": 4,
+          "paid": 8,
+          "excess": 4,
+          "reason": "Historical paid customers predate signup tracking"
+        },
+        {
+          "date": "2024-01-19",
+          "signups": 6,
+          "paid": 10,
+          "excess": 4,
+          "reason": "Historical paid customers predate signup tracking"
+        },
+        {
+          "date": "2024-02-11",
+          "signups": 0,
+          "paid": 1,
+          "excess": 1,
+          "reason": "Historical paid customers predate signup tracking"
+        },
+        {
+          "date": "2025-08-25",
+          "signups": 0,
+          "paid": 1,
+          "excess": 1,
+          "reason": "Historical paid customers predate signup tracking"
+        },
+        {
+          "date": "2025-10-11",
+          "signups": 0,
+          "paid": 1,
+          "excess": 1,
+          "reason": "Historical paid customers predate signup tracking"
+        }
+      ]
+    }
+  },
+  "coverage_periods": {
+    "signups": {
+      "start": "2024-01-17",
+      "end": "2026-06-19",
+      "total": 3032
+    },
+    "uploads": {
+      "start": "2025-12-03",
+      "end": "2026-06-18",
+      "total": 101
+    },
+    "paid": {
+      "start": "2024-01-17",
+      "end": "2026-06-17",
+      "total": 432
+    },
+    "database": {
+      "start": "2024-01-17",
+      "end": "2026-06-19",
+      "records": 816
+    }
+  },
+  "validation_failures": [
+    {
+      "rule": "coverage_period_alignment",
+      "status": "WARN",
+      "message": "Upload tracking started 686 days after signup tracking \u2014 All-Time comparison is INVALID for conversion rates",
+      "signup_start": "2024-01-17",
+      "upload_start": "2025-12-03",
+      "gap_days": 686
+    },
+    {
+      "rule": "daily_paid_lte_signups",
+      "status": "WARN",
+      "message": "5 days where paid > signups \u2014 historical customers predating signup tracking",
+      "affected_days": [
+        "2024-01-17",
+        "2024-01-19",
+        "2024-02-11",
+        "2025-08-25",
+        "2025-10-11"
+      ]
+    }
+  ],
+  "validation_passes": [
+    {
+      "rule": "uploads <= signups",
+      "status": "PASS",
+      "message": "Uploads (101) <= Signups (3032)"
+    },
+    {
+      "rule": "paid <= signups",
+      "status": "PASS",
+      "message": "Paid (432) <= Signups (3032)"
+    },
+    {
+      "rule": "signup_to_upload_rate",
+      "status": "PASS",
+      "value": "3.3%",
+      "note": "Low because uploads only tracked from Dec 2025"
+    }
+  ],
+  "common_period": {
+    "start": "2025-12-03",
+    "end": "2026-06-17",
+    "common_signups": 511,
+    "common_uploads": 100,
+    "common_paid": 56,
+    "note": "All-Time should use this period for valid conversion rates"
+  },
+  "summary": {
+    "total_records": 816,
+    "alltime_signups": 3032,
+    "alltime_uploads": 101,
+    "alltime_paid": 432,
+    "signup_to_upload_pct": 3.33,
+    "signup_to_paid_pct": 14.25,
+    "common_period_start": "2025-12-03",
+    "common_period_end": "2026-06-17",
+    "common_signups": 511,
+    "common_uploads": 100,
+    "common_paid": 56,
+    "common_s2u_pct": 19.57,
+    "common_s2p_pct": 10.96,
+    "validation_failures": 2,
+    "validation_passes": 3,
+    "impossible_paid_days": 5,
+    "root_cause": [
+      "Uploads tracked from Dec 2025 only \u2014 All-Time signup vs upload comparison is INVALID",
+      "Paid customers include historical data predating signup tracking",
+      "All-Time logic must use COMMON COVERAGE PERIOD (Dec 2025 onwards) for valid conversion rates",
+      "5 days with paid > signups are historical anomalies \u2014 not data corruption"
+    ],
+    "recommended_alltime_label": "Common Period (2025-12-03 to 2026-06-17)"
+  },
+  "validations": [
+    {
+      "rule": "uploads <= signups",
+      "status": "PASS",
+      "message": "Uploads (101) <= Signups (3032)"
+    },
+    {
+      "rule": "paid <= signups",
+      "status": "PASS",
+      "message": "Paid (432) <= Signups (3032)"
+    },
+    {
+      "rule": "signup_to_upload_rate",
+      "status": "PASS",
+      "value": "3.3%",
+      "note": "Low because uploads only tracked from Dec 2025"
+    },
+    {
+      "rule": "coverage_period_alignment",
+      "status": "WARN",
+      "message": "Upload tracking started 686 days after signup tracking \u2014 All-Time comparison is INVALID for conversion rates",
+      "signup_start": "2024-01-17",
+      "upload_start": "2025-12-03",
+      "gap_days": 686
+    },
+    {
+      "rule": "daily_paid_lte_signups",
+      "status": "WARN",
+      "message": "5 days where paid > signups \u2014 historical customers predating signup tracking",
+      "affected_days": [
+        "2024-01-17",
+        "2024-01-19",
+        "2024-02-11",
+        "2025-08-25",
+        "2025-10-11"
+      ]
+    }
+  ]
+}
