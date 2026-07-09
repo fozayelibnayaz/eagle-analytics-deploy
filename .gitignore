@@ -1,0 +1,78 @@
+# Secrets
+.streamlit/secrets.toml
+.streamlit/youtube_oauth.json
+.env
+.env.local
+.api_keys.json
+google_creds.json
+monthly_goals.json
+
+# Scraper session state
+kpi_storage_state.json
+kpi_cookies.json
+kpi_storage_dump.json
+stripe_cookies.json
+stripe_storage_state.json
+linkedin.json
+data_output/linkedin_cookies.json
+data_output/linkedin_session_state.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Logs & runtime
+logs/
+*.log
+browser_session/
+stripe_session/
+data_output/*.json
+data_output/*.csv
+data_output/debug/
+data/
+backups/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Legacy / archived
+_project_archive/
+_lead_qa_reports/
+_mongo_fix_reports/
+_production_reports/
+eagle3d_database_export_*/
+.github/workflows_disabled/
+
+# Auto-added — protect runtime state + backups (kept locally, not pushed)
+.streamlit/secrets_check.bak_20260630_093830
+app.py.backup_20260708_215106
+dashboard.py.responsive_backup_20260520_162044
+ga4_responsive_css.py.fix_20260520_194308
+_script.py
+*.bak
+*.bak_*
+*.backup_*
+*.backup
+*.responsive_backup_*
+*.fix_*
+*.gsheets_backup
+scrape_kpi.py.bak.*
+.streamlit/*.bak*
+.streamlit/*.backup*
+nohup.out

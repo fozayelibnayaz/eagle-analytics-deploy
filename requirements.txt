@@ -1,0 +1,52 @@
+# ═══════════════════════════════════════════════════════════════
+# Eagle 3D Streaming — Analytics Hub
+# 100% MongoDB local. Single requirements file (app + pipeline).
+# Python 3.11 (pipeline) / 3.9+ (local dev)
+# ═══════════════════════════════════════════════════════════════
+
+# ── Web app ──
+streamlit>=1.32.0
+streamlit-cookies-controller>=0.0.4
+
+# ── Data & viz ──
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+matplotlib>=3.7.0
+
+# ── Database (MongoDB local ONLY) ──
+pymongo>=4.7.0
+certifi>=2024.2.2
+
+# ── Google APIs (GA4 + Sheets read-only backfill) ──
+google-analytics-data>=0.18.0
+google-auth>=2.22.0
+google-api-python-client>=2.100.0
+gspread>=5.10
+
+# ── AI ──
+openai>=1.12.0
+google-generativeai>=0.7.0
+
+# ── Scraping ──
+playwright>=1.44.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+requests>=2.31.0
+
+# ── Stripe ──
+stripe>=8.0.0
+
+# ── Email validation ──
+email-validator>=2.0
+dnspython>=2.4
+
+# ── ML ──
+scikit-learn>=1.3.0
+statsmodels>=0.14.0
+joblib>=1.3.0
+
+# ── Utilities ──
+python-dateutil>=2.8.0
+pytz>=2024.1
+openpyxl>=3.1.0
