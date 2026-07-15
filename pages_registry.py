@@ -84,7 +84,7 @@ def _safe_call(fn_getter, *args, **kwargs):
 # ═════════════════════════════════════════════════════════════════
 def render_kpi_page(user_email: str = "") -> None:
     _hero("📊", "KPI Analytics",
-          "Sign-ups, uploads & new paying customers — full analysis suite.")
+          "Sign-ups, uploads & new new paying customers — full analysis suite.")
     _period_banner()
 
     with page_error_boundary("KPI"):
