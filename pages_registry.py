@@ -153,11 +153,6 @@ def _render_kpi_dashboard(user_email: str) -> None:
     c1.metric("👥 Sign-ups",  f"{sign:,}", _pct(sign, prev_s))
     c2.metric("📤 Uploads",   f"{up:,}",   _pct(up, prev_u))
     c3.metric("💳 New Paying Customers",       f"{pay:,}",  _pct(pay, prev_p))
-    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
-    c4, c5 = st.columns(2)
-    c4.metric("🔁 Recurring Customers", f"{recurring:,}")
-    c5.metric("🛑 Stopped Recurring", f"{stopped:,}")
-
 
     # Funnel
     st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
@@ -657,7 +652,7 @@ def _render_cross_inline() -> None:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("👥 Sign-ups (period)", f"{sign:,}")
-    c2.metric("💳 New New Paying Customers (period)",      f"{pay:,}")
+    c2.metric("💳 New Paying Customers (period)",      f"{pay:,}")
     c3.metric("▶ YT Subs",              f"{int(yt.get('subscribers', 0) or 0):,}")
     c4.metric("💼 LI Followers",        f"{int(li.get('total_followers', 0) or 0):,}")
 
