@@ -1408,7 +1408,7 @@ def main() -> None:
     )
 
 
-    _route(current_page, user_email)
+    route(current_page, user_email)
     st.markdown("</div>", unsafe_allow_html=True)
 
 main()
