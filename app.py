@@ -735,6 +735,11 @@ def _placeholder(title: str, sub: str, icon: str = "🚧") -> None:
 def _route(page: str, user_email: str) -> None:
     if page == "dashboard":
         _render_dashboard(user_email)
+        try:
+            from customer_kpi_breakdown_ui import render_customer_kpi_breakdown
+            render_customer_kpi_breakdown()
+        except Exception as _e:
+            st.warning(f"Customer KPI breakdown unavailable: {_e}")
     elif page == "settings":
         _render_settings(user_email)
     elif page == "_logout":
