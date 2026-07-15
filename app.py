@@ -826,8 +826,8 @@ def _render_dashboard(user_email: str) -> None:
         # ══════════════════════════════════════════════════════════════
         # Fetch counts from daily_kpis (POST-DEDUP + POST-VALIDATION)
         # ══════════════════════════════════════════════════════════════
-        signups = uploads = payments = 0
-        prev_signups = prev_uploads = prev_payments = 0
+        signups = uploads = payments = recurring_customers = stopped_recurring_customers = 0
+        prev_signups = prev_uploads = prev_payments = prev_recurring_customers = prev_stopped_recurring_customers = 0
         revenue = 0.0
         db_connected = False
         colls = daily = 0
@@ -1039,7 +1039,7 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card
