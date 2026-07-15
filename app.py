@@ -927,6 +927,22 @@ def _render_dashboard(user_email: str) -> None:
                 unsafe_allow_html=True,
             )
 
+
+        st.markdown("<div style='margin-top:18px;'></div>", unsafe_allow_html=True)
+        st.markdown(
+            '''
+            <div style="margin-bottom:8px;">
+              <div style="font-size:13px;color:#9CA3AF;font-weight:600;letter-spacing:.02em;">
+                CUSTOMER PAYMENT BREAKDOWN
+              </div>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+        rc1, rc2 = st.columns(2)
+        rc1.metric("🔁 Recurring Customers", f"{int(recurring_customers):,}")
+        rc2.metric("🛑 Stopped Recurring", f"{int(stopped_recurring_customers):,}")
+
         # ── Pipeline controls + health ──
         pipe_c1, pipe_c2, pipe_c3 = st.columns([1, 1, 1])
         with pipe_c1:
@@ -1023,7 +1039,7 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 New New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card

@@ -152,7 +152,12 @@ def _render_kpi_dashboard(user_email: str) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric("👥 Sign-ups",  f"{sign:,}", _pct(sign, prev_s))
     c2.metric("📤 Uploads",   f"{up:,}",   _pct(up, prev_u))
-    c3.metric("💳 New New Paying Customers",       f"{pay:,}",  _pct(pay, prev_p))
+    c3.metric("💳 New Paying Customers",       f"{pay:,}",  _pct(pay, prev_p))
+    st.markdown("<div style='margin-top:16px;'></div>", unsafe_allow_html=True)
+    c4, c5 = st.columns(2)
+    c4.metric("🔁 Recurring Customers", f"{recurring:,}")
+    c5.metric("🛑 Stopped Recurring", f"{stopped:,}")
+
 
     # Funnel
     st.markdown("<div style='margin-top:24px;'></div>", unsafe_allow_html=True)
@@ -177,14 +182,14 @@ def _render_kpi_dashboard(user_email: str) -> None:
         if rows:
             df = pd.DataFrame(rows)
             df = df[df["date"].notna()].sort_values("date")
-            for c in ["signups_accepted", "uploads_accepted", "paid_accepted"]:
+            for c in ["signups", "first_uploads", "new_paid_customers"]:
                 if c not in df.columns: df[c] = 0
                 df[c] = df[c].fillna(0).astype(int)
             fig = go.Figure()
             for k, lbl, col, fill in [
-                ("signups_accepted", "Sign-ups", "#9EFF2F", "rgba(158,255,47,0.10)"),
-                ("uploads_accepted", "Uploads",  "#5EF46A", "rgba(94,244,106,0.08)"),
-                ("paid_accepted",    "Paid",     "#4ADE80", "rgba(74,222,128,0.06)"),
+                ("signups", "Sign-ups", "#9EFF2F", "rgba(158,255,47,0.10)"),
+                ("first_uploads", "Uploads",  "#5EF46A", "rgba(94,244,106,0.08)"),
+                ("new_paid_customers",    "New Paying Customers",     "#4ADE80", "rgba(74,222,128,0.06)"),
             ]:
                 fig.add_trace(go.Scatter(x=df["date"], y=df[k], name=lbl,
                                           mode="lines", line=dict(color=col, width=2.5),
