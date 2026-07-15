@@ -3,6 +3,7 @@ app.py — Eagle 3D Streaming Analytics Hub
 Premium Monetra-style dark dashboard. MongoDB-only.
 """
 from __future__ import annotations
+from kpi_totals_resolver import resolve_period_kpis
 
 import base64
 from datetime import datetime, date
@@ -1022,7 +1023,7 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card
