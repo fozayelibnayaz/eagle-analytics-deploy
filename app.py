@@ -1017,14 +1017,14 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card
             wallet_card(
                 title="Revenue Balance",
                 balance=revenue,
-                subtitle=f"{period.label} — {payments} paying customers",
+                subtitle=f"{period.label} — {payments} new paying customers",
                 holder=(user_email.upper()[:24] if user_email else "EAGLE 3D STREAMING"),
             )
             st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
