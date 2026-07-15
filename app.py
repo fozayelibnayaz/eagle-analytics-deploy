@@ -732,20 +732,9 @@ def _placeholder(title: str, sub: str, icon: str = "🚧") -> None:
         """,
         unsafe_allow_html=True,
     )
-
-def _route(page: str, user_email: str) -> None:
+def route(page: str, user_email: str) -> None:
     if page == "dashboard":
-        _render_dashboard(user_email)    elif page == "settings":
-        _render_settings(user_email)
-    elif page == "_logout":
-        try:
-            from auth_guard import logout
-            logout()
-        except Exception:
-            for k in ("_pwd_ok", "_auth_ok", "user_email", "user_role"):
-                st.session_state.pop(k, None)
-        st.query_params.clear()
-        st.rerun()
+        render_dashboard(user_email)
     elif page == "kpi":
         from pages_registry import render_kpi_page
         render_kpi_page(user_email)
@@ -770,15 +759,15 @@ def _route(page: str, user_email: str) -> None:
     elif page == "custom":
         from pages_registry import render_custom_page
         render_custom_page(user_email)
+    elif page == "settings":
+        st.info("Settings page is available through the app controls.")
+    elif page == "_logout":
+        for k in ("_pwd_ok", "_auth_ok", "user_email", "user_role", "current_page"):
+            st.session_state.pop(k, None)
+        st.query_params.clear()
+        st.rerun()
     else:
-        _placeholder("Not Found", "Unknown page", "❓")
-
-
-# ─── Dashboard ───────────────────────────────────────────────────
-def _greeting() -> str:
-    h = datetime.now().hour
-    return "Good morning" if h < 12 else ("Good afternoon" if h < 18 else "Good evening")
-
+        st.warning(f"Unknown page: {page}")
 def _render_dashboard(user_email: str) -> None:
     from period_engine import get_period
     from ui_helpers import (
@@ -921,22 +910,6 @@ def _render_dashboard(user_email: str) -> None:
                 unsafe_allow_html=True,
             )
 
-
-        st.markdown("<div style='margin-top:18px;'></div>", unsafe_allow_html=True)
-        st.markdown(
-            '''
-            <div style="margin-bottom:8px;">
-              <div style="font-size:13px;color:#9CA3AF;font-weight:600;letter-spacing:.02em;">
-                CUSTOMER PAYMENT BREAKDOWN
-              </div>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-        rc1, rc2 = st.columns(2)
-        rc1.metric("🔁 Recurring Customers", f"{int(recurring_customers):,}")
-        rc2.metric("🛑 Stopped Recurring", f"{int(stopped_recurring_customers):,}")
-
         # ── Pipeline controls + health ──
         pipe_c1, pipe_c2, pipe_c3 = st.columns([1, 1, 1])
         with pipe_c1:
@@ -1033,7 +1006,7 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card
