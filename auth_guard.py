@@ -292,8 +292,104 @@ def _brand_row() -> str:
     """
 
 
+def _render_login_banner():
+    """Animated brand banner shown above login forms."""
+    import base64
+    from pathlib import Path as _P
+    import streamlit as st
+
+    # Load logo
+    logo_b64 = ""
+    for f in ["static/eagle3d_logo2.png", "static/eagle3d_logo.png"]:
+        fp = _P(f)
+        if fp.exists():
+            logo_b64 = base64.b64encode(fp.read_bytes()).decode()
+            break
+
+    st.markdown(f"""
+    <style>
+      @keyframes e3-pulse {{
+        0%, 100% {{ transform: scale(1); opacity: 0.6; }}
+        50%      {{ transform: scale(1.15); opacity: 1; }}
+      }}
+      @keyframes e3-shine {{
+        0%   {{ transform: translateX(-100%); }}
+        100% {{ transform: translateX(200%); }}
+      }}
+      @keyframes e3-float {{
+        0%, 100% {{ transform: translateY(0); }}
+        50%      {{ transform: translateY(-8px); }}
+      }}
+      .e3-login-banner {{
+        position: relative;
+        background: linear-gradient(135deg, #0d1810 0%, #1a2e1f 50%, #0d1810 100%);
+        border: 1px solid rgba(158,255,47,0.25);
+        border-radius: 20px;
+        padding: 32px 24px;
+        text-align: center;
+        margin-bottom: 24px;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(158,255,47,0.08);
+      }}
+      .e3-login-banner::before {{
+        content: '';
+        position: absolute;
+        top: 0; left: 0;
+        width: 40%; height: 200%;
+        background: linear-gradient(to right,
+          transparent 0%, rgba(158,255,47,0.15) 50%, transparent 100%);
+        animation: e3-shine 4s infinite ease-in-out;
+        pointer-events: none;
+      }}
+      .e3-login-banner-logo {{
+        width: 80px; height: 80px;
+        margin: 0 auto 12px auto;
+        animation: e3-float 3s ease-in-out infinite;
+        filter: drop-shadow(0 4px 20px rgba(158,255,47,0.4));
+      }}
+      .e3-login-banner-title {{
+        color: #fff;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0 0 6px 0;
+      }}
+      .e3-login-banner-sub {{
+        color: #9CA3AF;
+        font-size: 13px;
+        margin: 0;
+      }}
+      .e3-login-banner-dots {{
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 16px;
+      }}
+      .e3-login-banner-dots span {{
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: #9EFF2F;
+        animation: e3-pulse 1.4s infinite ease-in-out;
+      }}
+      .e3-login-banner-dots span:nth-child(2) {{ animation-delay: 0.2s; }}
+      .e3-login-banner-dots span:nth-child(3) {{ animation-delay: 0.4s; }}
+    </style>
+    <div class="e3-login-banner">
+      <img class="e3-login-banner-logo"
+           src="data:image/png;base64,{logo_b64}"
+           alt="Eagle 3D Streaming" />
+      <div class="e3-login-banner-title">Eagle 3D Streaming</div>
+      <div class="e3-login-banner-sub">Analytics Hub · Real-time business intelligence</div>
+      <div class="e3-login-banner-dots">
+        <span></span><span></span><span></span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def _render_password_screen():
     _hide_chrome(); _login_css()
+    _render_login_banner()
     st.markdown('<div class="e3-login-card">', unsafe_allow_html=True)
     st.markdown(_brand_row(), unsafe_allow_html=True)
     st.markdown('<div class="e3-login-title">Analytics Hub</div>',
@@ -323,6 +419,7 @@ def _render_email_screen():
     from access_control import is_allowed, log_access
 
     _hide_chrome(); _login_css()
+    _render_login_banner()
     st.markdown('<div class="e3-login-card">', unsafe_allow_html=True)
     st.markdown(_brand_row(), unsafe_allow_html=True)
     st.markdown('<div class="e3-login-title">Verify your identity</div>',

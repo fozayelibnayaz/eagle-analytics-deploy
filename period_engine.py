@@ -54,7 +54,7 @@ COMPARE_MODES = [
     "vs Custom Range",
 ]
 
-DEFAULT_PRESET  = "Last 30 Days"
+DEFAULT_PRESET  = "This Month"
 DEFAULT_COMPARE = "Off"
 
 

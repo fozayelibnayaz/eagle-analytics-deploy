@@ -76,3 +76,26 @@ scrape_kpi.py.bak.*
 .streamlit/*.bak*
 .streamlit/*.backup*
 nohup.out
+
+# local secrets
+.streamlit/secrets.toml
+
+# cookies / auth state
+linkedin_cookies.json
+data/linkedin_cookies.json
+data_output/linkedin_cookies.json
+data/linkedin_session_state.json
+data_output/linkedin_session_state.json
+browser_session/
+
+# generated runtime/artifacts
+downloads/
+archive/
+backups/
+logs/
+audits/
+data_output/linkedin_exports_json/
+
+# scratch and saves
+*.bak
+*.save

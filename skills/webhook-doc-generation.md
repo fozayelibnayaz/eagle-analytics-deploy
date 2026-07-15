@@ -1,0 +1,1 @@
+# Skill: Webhook Doc Generation\n- Read API_KEY from .streamlit/secrets.toml\n- Generate WEBHOOK_GUIDE.md\n- Print success output\n

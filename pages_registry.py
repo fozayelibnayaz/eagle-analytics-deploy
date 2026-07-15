@@ -417,14 +417,15 @@ def _render_alerts() -> None:
 # PAGE 2: GOOGLE ANALYTICS (delegates to your existing module)
 # ═════════════════════════════════════════════════════════════════
 def render_ga4_page(user_email: str = "") -> None:
-    _hero("📈", "Google Analytics",
-          "GA4 traffic, sources, attribution & pattern analysis.")
+    _hero("📈", "Google Analytics + Website Events",
+          "GA4 traffic, sources, attribution, pattern analysis + GTM event tracking.")
     _period_banner()
 
     with page_error_boundary("GA4"):
         tabs = st.tabs([
-            "�� Overview",
+            "📊 Overview",
             "🚦 Traffic Intelligence",
+            "🎯 Website Events",
             "📊 Pattern Analysis",
             "📈 Trend Analysis",
         ])
@@ -433,20 +434,29 @@ def render_ga4_page(user_email: str = "") -> None:
             _render_ga4_overview()
 
         with tabs[1]:
-            # Delegate to your existing full ga4 UI if any exists
             try:
-                # Try importing the full ga4 experience
                 from ga4_source_intel import render_source_intel
                 render_source_intel()
             except (ImportError, AttributeError):
                 _render_ga4_overview()
 
         with tabs[2]:
-            _safe_call(lambda: __import__("ga4_pattern_ui").render_ga4_pattern_analysis)
+            try:
+                from events_page_ui import render_events_page
+                render_events_page(user_email)
+            except Exception as e:
+                st.error(f"Events page error: {e}")
+                import traceback
+                with st.expander("Trace"):
+                    st.code(traceback.format_exc())
 
         with tabs[3]:
+            _safe_call(lambda: __import__("ga4_pattern_ui").render_ga4_pattern_analysis)
+
+        with tabs[4]:
             _safe_call(lambda: __import__("trend_analysis_ui").render_trend_section,
                        platform="ga4")
+
 
 
 def _render_ga4_overview() -> None:

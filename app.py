@@ -41,10 +41,10 @@ NAV_PAGES = [
 SIDEBAR_ICONS = [
     ("dashboard", "⊞",  "Dashboard"),
     ("kpi",       "📊", "KPI Analytics"),
-    ("ga4",       "📈", "Traffic"),
-    ("youtube",   "▶",  "YouTube"),
-    ("linkedin",  "💼", "LinkedIn"),
-    ("cs",        "🎯", "Customers"),
+    ("ga4",       "<img src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI0Y5QUIwMCI+PHBhdGggZD0iTTIyLjg0IDIuOTk4djE3Ljk5OWEyLjk4MyAyLjk4MyAwIDAxLTIuOTk4IDIuOTk4IDIuOTgzIDIuOTgzIDAgMDEtMi45OTgtMi45OThWMi45OThBMi45ODMgMi45ODMgMCAwMTE5Ljg0MiAwYTIuOTgzIDIuOTgzIDAgMDEyLjk5OCAyLjk5OHpNOC4xNTggMTQuODQ1djYuMTUzYTIuOTk4IDIuOTk4IDAgMTA1Ljk5NiAwdi02LjE1M2EyLjk5OCAyLjk5OCAwIDEwLTUuOTk2IDB6TTMgMjAuOTk4YTIuOTk4IDIuOTk4IDAgMTA1Ljk5NiAwIDIuOTk4IDIuOTk4IDAgMDAtNS45OTYgMHoiLz48L3N2Zz4=' width='20' height='20' style='display:block;'/>", "Traffic + Events"),
+    ("youtube",   "<img src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI0ZGMDAwMCI+PHBhdGggZD0iTTIzLjQ5OCA2LjE4NmEyLjk5OSAyLjk5OSAwIDAwLTIuMTA5LTIuMTE3QzE5LjQ3MiAzLjUgMTIgMy41IDEyIDMuNXMtNy40NzIgMC05LjM4OS41NjlBMi45OTkgMi45OTkgMCAwMC41MDIgNi4xODZDMCA4LjA5IDAgMTIgMCAxMnMwIDMuOTEuNTAyIDUuODE0YTIuOTk5IDIuOTk5IDAgMDAyLjEwOSAyLjExN0M0LjUyOCAyMC41IDEyIDIwLjUgMTIgMjAuNXM3LjQ3MiAwIDkuMzg5LS41NjlhMi45OTkgMi45OTkgMCAwMDIuMTA5LTIuMTE3QzI0IDE1LjkxIDI0IDEyIDI0IDEyczAtMy45MS0uNTAyLTUuODE0ek05Ljc1IDE1LjU2OFY4LjQzMkwxNS44MTggMTJsLTYuMDY4IDMuNTY4eiIvPjwvc3ZnPg==' width='22' height='22' style='display:block;'/>", "YouTube"),
+    ("linkedin",  "<img src='data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzBBNjZDMiI+PHBhdGggZD0iTTIwLjUgMmgtMTdBMS41IDEuNSAwIDAwMiAzLjV2MTdBMS41IDEuNSAwIDAwMy41IDIyaDE3YTEuNSAxLjUgMCAwMDEuNS0xLjV2LTE3QTEuNSAxLjUgMCAwMDIwLjUgMnpNOCAxOUg1di05aDN6TTYuNSA4LjI1QTEuNzUgMS43NSAwIDExOC4zIDYuNWExLjc4IDEuNzggMCAwMS0xLjggMS43NXpNMTkgMTloLTN2LTQuNzRjMC0xLjQyLS42LTEuOTMtMS4zOC0xLjkzQTEuNzQgMS43NCAwIDAwMTMgMTQuMTlhLjY2LjY2IDAgMDAwIC4xNFYxOWgtM3YtOWgyLjl2MS4zYTMuMTEgMy4xMSAwIDAxMi43LTEuNGMxLjU1IDAgMy4zNi44NiAzLjM2IDMuNjZ6Ii8+PC9zdmc+' width='20' height='20' style='display:block;'/>", "LinkedIn"),
+    ("cs",        "🎯", "Customer Success"),
     ("cross",     "🔗", "Cross-Platform"),
     ("ai",        "✦",  "AI Insights"),
     ("custom",    "🧩", "Custom Modules"),
@@ -587,7 +587,7 @@ def _render_chrome(current_page: str, user_email: str) -> None:
         ("ga4",       "Traffic"),
         ("youtube",   "YouTube"),
         ("linkedin",  "LinkedIn"),
-        ("cs",        "Customers"),
+        ("cs",        "CS"),
         ("cross",     "Cross"),
         ("ai",        "AI"),
         ("custom",    "Custom"),
@@ -1042,6 +1042,60 @@ def _render_dashboard(user_email: str) -> None:
 
         st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
 
+        # ── ALL SYSTEMS SUMMARY (YouTube + LinkedIn + CS + GA4) ──
+        st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+        st.markdown('<p class="e3-section-title">All Channels — Latest Snapshot</p>',
+                    unsafe_allow_html=True)
+
+        try:
+            from mongo_client import find_one, find_all as _fa, count_docs
+            from pathlib import Path as _P
+            import json as _json
+
+            # YouTube
+            ch = find_one("youtube_channel", {}) or {}
+            yt_subs   = int(ch.get("subscribers", 0) or 0)
+            yt_views  = int(ch.get("view_count", 0) or 0)
+            yt_videos = int(ch.get("video_count", 0) or 0)
+
+            # LinkedIn
+            hl_rows = _fa("linkedin_highlights_daily",
+                           sort=[("snapshot_date", -1)], limit=1)
+            hl = hl_rows[0] if hl_rows else {}
+            li_followers  = int(hl.get("total_followers", 0) or 0)
+            li_impressions= int(hl.get("impressions", 0) or 0)
+            li_reactions  = int(hl.get("reactions", 0) or 0)
+
+            # GA4 (cached)
+            ga4_c = _P("data_output/ga4_traffic_cache.json")
+            ga4_sessions = 0
+            ga4_users = 0
+            if ga4_c.exists():
+                d = _json.loads(ga4_c.read_text())
+                ga4_sessions = int(d.get("total_sessions", 0) or 0)
+                ga4_users    = int(d.get("total_users", 0) or 0)
+
+            # CS
+            cs_count = count_docs("customer_success_master")
+
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1:
+                st.metric("▶ YouTube Subs",  f"{yt_subs:,}",
+                            f"{yt_videos} videos · {yt_views:,} views")
+            with sc2:
+                st.metric("💼 LinkedIn Followers", f"{li_followers:,}",
+                            f"{li_impressions:,} imp · {li_reactions} reactions")
+            with sc3:
+                st.metric("🌐 GA4 Sessions", f"{ga4_sessions:,}",
+                            f"{ga4_users:,} users")
+            with sc4:
+                st.metric("🎯 CS Rows",       f"{cs_count:,}",
+                            "customer records")
+        except Exception as _e:
+            st.info(f"All-systems summary unavailable: {_e}")
+
+        st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+
         # ── Funnel ──
         su = round(uploads / signups * 100, 1) if signups else 0
         up = round(payments / uploads * 100, 1) if uploads else 0
@@ -1249,7 +1303,7 @@ def _sync_period_from_url():
             st.session_state["period_compare"] = url_cmp
 
     # SAVE — push to URL + Mongo
-    cur_preset  = st.session_state.get("period_preset", "Last 30 Days")
+    cur_preset  = st.session_state.get("period_preset", "This Month")
     cur_compare = st.session_state.get("period_compare", "Off")
 
     if qp.get("prd") != cur_preset:

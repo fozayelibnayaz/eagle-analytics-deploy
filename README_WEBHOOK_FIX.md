@@ -1,0 +1,1 @@
+# Webhook Fix README\n\nUse this exact command to generate the guide:\npython3 scripts/generate_webhook_guide.py\n

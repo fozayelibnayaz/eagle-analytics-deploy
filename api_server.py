@@ -119,6 +119,9 @@ def root():
         "version":     "1.0.0",
         "docs":        "/docs",
         "authenticated_endpoints": [
+            "/webhook",
+            "/webhook/test",
+            "/webhook/log",
             "/api/kpis/summary",
             "/api/kpis/daily",
             "/api/signups",
@@ -482,6 +485,250 @@ def get_collection(
 
 
 # ═════════════════════════════════════════════════════════════════
+
+
+# ═════════════════════════════════════════════════════════════════
+# WEBHOOK — backend developer (Aninda) POSTs data here to sync
+# ═════════════════════════════════════════════════════════════════
+from pydantic import BaseModel, Field
+from typing import Literal
+
+
+class WebhookItem(BaseModel):
+    """One item in the webhook batch."""
+    type: Literal["signup", "upload", "payment"]
+    info: Dict[str, Any] = Field(..., description="Data payload for this item")
+
+
+class WebhookPayload(BaseModel):
+    """POST body sent by backend."""
+    data: List[WebhookItem]
+    source: Optional[str] = Field(default="backend", description="Where data came from")
+
+
+def _process_signup(info: Dict[str, Any]) -> Dict[str, Any]:
+    from datetime import datetime as _dt
+    from mongo_client import upsert_one
+
+    unique_id = str(info.get("id") or info.get("_id") or "").strip()
+    email = str(info.get("email") or info.get("mail") or "").strip().lower()
+
+    if not unique_id and not email:
+        return {"ok": False, "error": "missing id and email"}
+
+    doc = {
+        "id":                  unique_id or email,
+        "email":               info.get("email") or email,
+        "email_normalized":    email,
+        "signup_date":         info.get("signup_date") or info.get("createdOn") or info.get("date"),
+        "lead_source":         info.get("lead_source") or info.get("leadSource") or "unknown",
+        "phone":               info.get("phone") or info.get("phoneNumber") or "",
+        "username":            info.get("username") or "",
+        "final_status":        info.get("final_status") or "PENDING",
+        "raw_data":            info,
+        "source":              "webhook",
+        "webhook_received_at": _dt.utcnow().isoformat(),
+    }
+    ok = upsert_one("signups", doc, ["email_normalized"])
+    return {"ok": ok, "id": doc["id"], "email": email}
+
+
+def _process_upload(info: Dict[str, Any]) -> Dict[str, Any]:
+    from datetime import datetime as _dt
+    from mongo_client import upsert_one
+
+    unique_id = str(info.get("id") or "").strip()
+    email = str(info.get("email") or info.get("mail") or "").strip().lower()
+    if not email:
+        return {"ok": False, "error": "missing email"}
+
+    doc = {
+        "id":                  unique_id or email,
+        "email":               info.get("email") or email,
+        "email_normalized":    email,
+        "upload_date":         info.get("upload_date") or info.get("date"),
+        "app_name":            info.get("app_name") or info.get("appname") or "",
+        "username":            info.get("username") or "",
+        "final_status":        info.get("final_status") or "PENDING",
+        "raw_data":            info,
+        "source":              "webhook",
+        "webhook_received_at": _dt.utcnow().isoformat(),
+    }
+    ok = upsert_one("uploads", doc, ["email_normalized"])
+    return {"ok": ok, "id": doc["id"], "email": email}
+
+
+def _process_payment(info: Dict[str, Any]) -> Dict[str, Any]:
+    from datetime import datetime as _dt
+    from mongo_client import upsert_one, find_one
+
+    unique_id = str(info.get("id") or "").strip()
+    email = str(info.get("email") or "").strip().lower()
+    if not email:
+        return {"ok": False, "error": "missing email"}
+
+    try:
+        amount = float(info.get("amount") or info.get("total_spend") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+
+    prev = find_one("payment_history", {"email_normalized": email})
+    customer_type = "RECURRING" if prev else "NEW_CUSTOMER"
+
+    doc = {
+        "id":                  unique_id or email,
+        "email":               info.get("email") or email,
+        "email_normalized":    email,
+        "first_payment_date":  info.get("first_payment_date") or info.get("payment_date") or info.get("date"),
+        "total_spend":         amount,
+        "payment_count":       int(info.get("payment_count") or 1),
+        "customer_type":       customer_type,
+        "final_status":        "ACCEPTED" if amount > 0 else "REJECTED",
+        "raw_data":            info,
+        "source":              "webhook",
+        "webhook_received_at": _dt.utcnow().isoformat(),
+    }
+    ok = upsert_one("payments", doc, ["email_normalized"])
+
+    if not prev and amount > 0:
+        upsert_one("payment_history", {
+            "email_normalized":        email,
+            "first_ever_payment_date": doc["first_payment_date"],
+            "first_ever_amount":       amount,
+            "recorded_at":             _dt.utcnow().isoformat(),
+        }, ["email_normalized"])
+
+    return {"ok": ok, "id": doc["id"], "email": email,
+             "customer_type": customer_type, "amount": amount}
+
+
+@app.post("/webhook", tags=["Webhook"],
+           dependencies=[Depends(verify_api_key)])
+def webhook_ingest(payload: WebhookPayload):
+    """Backend developer POSTs sync data here (signup/upload/payment batches)."""
+    from datetime import datetime as _dt
+
+    results = {"signups": [], "uploads": [], "payments": [], "errors": []}
+    dispatch = {"signup": _process_signup,
+                "upload": _process_upload,
+                "payment": _process_payment}
+
+    for i, item in enumerate(payload.data):
+        try:
+            handler = dispatch.get(item.type)
+            if not handler:
+                results["errors"].append({"index": i, "error": f"unknown type: {item.type}"})
+                continue
+            result = handler(item.info)
+            results[item.type + "s"].append(result)
+        except Exception as e:
+            results["errors"].append({"index": i, "type": item.type, "error": str(e)})
+
+    # Log the call
+    try:
+        from mongo_client import get_raw_db
+        db = get_raw_db()
+        if db is not None:
+            db["webhook_log"].insert_one({
+                "received_at": _dt.utcnow().isoformat(),
+                "source":      payload.source,
+                "items_total": len(payload.data),
+                "signups":     len(results["signups"]),
+                "uploads":     len(results["uploads"]),
+                "payments":    len(results["payments"]),
+                "errors":      len(results["errors"]),
+            })
+    except Exception:
+        pass
+
+    # Telegram alert
+    try:
+        from reporting_engine import send_telegram
+        counts = {"signups": len(results["signups"]),
+                  "uploads": len(results["uploads"]),
+                  "payments": len(results["payments"])}
+        if any(counts.values()):
+            lines = ["🔔 *Webhook Sync*", "━━━━━━━━━━━━━━━━━━━━━━━"]
+            if counts["signups"]:  lines.append(f"👥 Signups: {counts['signups']}")
+            if counts["uploads"]:  lines.append(f"📤 Uploads: {counts['uploads']}")
+            if counts["payments"]:
+                lines.append(f"💳 Payments: {counts['payments']}")
+                new_cust = sum(1 for p in results["payments"]
+                                if p.get("customer_type") == "NEW_CUSTOMER")
+                if new_cust:
+                    lines.append(f"   ⭐ New customers: {new_cust}")
+            if results["errors"]:
+                lines.append(f"⚠️ Errors: {len(results['errors'])}")
+            lines.append("")
+            lines.append(f"Source: {payload.source}")
+            lines.append(f"⏰ {_dt.now().strftime('%b %d, %Y %I:%M %p')}")
+            send_telegram("\n".join(lines))
+    except Exception as e:
+        print(f"[webhook] Telegram failed: {e}")
+
+    return {
+        "success":      len(results["errors"]) == 0,
+        "processed":    {"signups":  len(results["signups"]),
+                          "uploads":  len(results["uploads"]),
+                          "payments": len(results["payments"])},
+        "errors_count": len(results["errors"]),
+        "results":      results,
+        "received_at":  _dt.utcnow().isoformat(),
+    }
+
+
+@app.get("/webhook/log", tags=["Webhook"],
+          dependencies=[Depends(verify_api_key)])
+def webhook_log(limit: int = Query(50, le=500)):
+    """View recent webhook call history."""
+    logs = find_all("webhook_log", sort=[("received_at", -1)], limit=limit)
+    return {"count": len(logs), "logs": _clean_docs(logs)}
+
+
+@app.get("/webhook/test", tags=["Webhook"],
+          dependencies=[Depends(verify_api_key)])
+def webhook_test():
+    """Example payload the backend should POST. Use to verify in Postman."""
+    return {
+        "endpoint":    "POST /webhook",
+        "auth_header": "X-API-Key: <your-key>",
+        "example_payload": {
+            "source": "aninda-backend",
+            "data": [
+                {"type": "signup",  "info": {
+                    "id": "unique-signup-id-123",
+                    "email": "newuser@example.com",
+                    "username": "newuser",
+                    "signup_date": "2026-07-13",
+                    "lead_source": "google",
+                    "phone": "+1234567890",
+                }},
+                {"type": "upload",  "info": {
+                    "id": "unique-upload-id-456",
+                    "email": "newuser@example.com",
+                    "upload_date": "2026-07-13",
+                    "app_name": "TestApp",
+                    "username": "newuser",
+                }},
+                {"type": "payment", "info": {
+                    "id": "unique-payment-id-789",
+                    "email": "newuser@example.com",
+                    "first_payment_date": "2026-07-13",
+                    "amount": 29.00,
+                    "payment_count": 1,
+                }},
+            ],
+        },
+        "notes": [
+            "Use unique id for each item — prevents duplicates on re-send",
+            "email is the primary dedup key (email_normalized in Mongo)",
+            "customer_type auto-tagged: NEW_CUSTOMER vs RECURRING",
+            "Every call fires a Telegram alert",
+            "All items processed atomically",
+        ],
+    }
+
+
 # ENTRY POINT
 # ═════════════════════════════════════════════════════════════════
 if __name__ == "__main__":

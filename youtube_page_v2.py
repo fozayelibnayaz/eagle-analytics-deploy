@@ -145,13 +145,13 @@ def render_youtube_page_v2() -> None:
         unsafe_allow_html=True,
     )
 
-    # ── Period selector + action buttons ──
-    period_options = ["Last 7 Days", "Last 28 Days", "Last 30 Days",
-                       "Last 90 Days", "Last 180 Days", "Last 12 Months", "All Time"]
+    # ── Unified period picker (19 presets) ──
+    from period_picker_shared import render_period_picker
+    yt_start, yt_end, period = render_period_picker("youtube", "This Month")
+
     c1, c2, c3, c4, c5 = st.columns([2.5, 1, 1, 1, 1])
     with c1:
-        period = st.selectbox("📅 Period", period_options, index=3,
-                                key="yt_period")
+        st.caption(f"Range: {yt_start} → {yt_end}")
     with c2:
         preview = st.button("👁 Preview", width='stretch')
     with c3:
@@ -207,9 +207,9 @@ def render_youtube_page_v2() -> None:
     st.markdown("---")
 
     # ── Date range for analytics ──
-    days = _period_days(period)
-    end_date = date.today().isoformat()
-    start_date = (date.today() - timedelta(days=days-1)).isoformat()
+    start_date = yt_start
+    end_date = yt_end
+    days = (date.fromisoformat(yt_end) - date.fromisoformat(yt_start)).days + 1
 
     # ── Top-level metric cards ──
     videos = find_all("youtube_videos", limit=500)

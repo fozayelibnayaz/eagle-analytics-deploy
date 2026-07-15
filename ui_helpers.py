@@ -263,28 +263,56 @@ def quick_actions_panel(actions: list) -> None:
 
 # ─── Live activity feed ──────────────────────────────────────────
 def activity_feed(events: list, title: str = "Recent Activity", max_show: int = 8) -> None:
-    """
-    events = [{"icon": "👥", "text": "New signup: x@y.com", "when": "2m ago", "color": "#9EFF2F"}, ...]
-    """
+    """Render an activity feed. Uses components.html to avoid markdown interpretation."""
+    import streamlit as st
+    import streamlit.components.v1 as components
+
     if not events:
         empty_state("No recent activity", "New events will appear here", icon="🕰️")
         return
 
-    st.markdown(f'<p class="e3-section-title">{title}</p>', unsafe_allow_html=True)
+    if title:
+        st.markdown(f'<p class="e3-section-title">{title}</p>', unsafe_allow_html=True)
 
-    items = ""
+    # Build clean HTML (no newlines between tags — prevents markdown code-block detection)
+    items_html = ""
     for e in events[:max_show]:
-        icon = e.get("icon", "•")
-        text = e.get("text", "")
-        when = e.get("when", "")
-        color = e.get("color", "#9EFF2F")
-        items += f"""
-        <div class="e3-activity-item">
-          <div class="e3-activity-dot" style="background:{color};box-shadow:0 0 12px {color}80;"></div>
-          <div class="e3-activity-content">
-            <div class="e3-activity-text">{icon} {text}</div>
-            <div class="e3-activity-when">{when}</div>
-          </div>
-        </div>
-        """
-    st.markdown(f'<div class="e3-activity-feed">{items}</div>', unsafe_allow_html=True)
+        icon = str(e.get("icon", "•"))
+        text = str(e.get("text", "")).replace("<", "&lt;").replace(">", "&gt;")
+        when = str(e.get("when", ""))
+        color = str(e.get("color", "#9EFF2F"))
+        items_html += (
+            '<div class="e3-activity-item">'
+            f'<div class="e3-activity-dot" style="background:{color};box-shadow:0 0 12px {color}80;"></div>'
+            '<div class="e3-activity-content">'
+            f'<div class="e3-activity-text">{icon} {text}</div>'
+            f'<div class="e3-activity-when">{when}</div>'
+            '</div></div>'
+        )
+
+    html = f"""<!DOCTYPE html><html><head><style>
+      body {{ background: #080808; margin: 0; padding: 0;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #fff; }}
+      .e3-activity-feed {{ background: #111; border: 1px solid rgba(255,255,255,0.06);
+                            border-radius: 20px; padding: 16px; max-height: 480px; overflow-y: auto; }}
+      .e3-activity-item {{ display: flex; align-items: flex-start; gap: 12px;
+                            padding: 10px 4px; border-bottom: 1px solid rgba(255,255,255,0.04); }}
+      .e3-activity-item:last-child {{ border-bottom: none; }}
+      .e3-activity-dot {{ width: 10px; height: 10px; border-radius: 50%;
+                          flex-shrink: 0; margin-top: 6px; }}
+      .e3-activity-content {{ flex: 1; min-width: 0; }}
+      .e3-activity-text {{ color: #fff; font-size: 13px; font-weight: 500;
+                            margin-bottom: 3px; line-height: 1.4;
+                            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+      .e3-activity-when {{ color: #6B7280; font-size: 11px; }}
+      ::-webkit-scrollbar {{ width: 6px; }}
+      ::-webkit-scrollbar-track {{ background: transparent; }}
+      ::-webkit-scrollbar-thumb {{ background: #333; border-radius: 3px; }}
+    </style></head><body>
+    <div class="e3-activity-feed">{items_html}</div>
+    </body></html>"""
+
+    height = min(80 + 60 * len(events[:max_show]), 520)
+    components.html(html, height=height, scrolling=True)
+
+

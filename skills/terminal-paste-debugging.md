@@ -1,0 +1,1 @@
+# Skill: Terminal Paste Debugging\n- Never paste Markdown filenames into terminal\n- Use plain filenames only\n- If you see heredoc> or >, press Ctrl+C\n

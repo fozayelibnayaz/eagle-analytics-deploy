@@ -82,50 +82,72 @@ def _get_db():
 
 
 def _setup_browser(headless=False):
-    """If session_state.json exists, use headless. Otherwise show browser."""
+    """
+    Reuse the same persistent LinkedIn Chrome profile seeded from full cookies.
+    """
+    from pathlib import Path
     from playwright.sync_api import sync_playwright
-    p = sync_playwright().start()
-    session_file = DATA_DIR / "linkedin_session_state.json"
-    use_headless = headless if session_file.exists() else False
-    browser = p.chromium.launch(
-        headless=use_headless,
-        args=["--no-sandbox","--disable-setuid-sandbox","--disable-dev-shm-usage","--disable-gpu",'--disable-blink-features=AutomationControlled'],
-    )
-    # Prefer saved session state (more reliable than cookies alone)
-    session_file = DATA_DIR / "linkedin_session_state.json"
-    context_args = {
-        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "viewport":   {"width": 1440, "height": 900},
-    }
-    if session_file.exists():
-        log(f"Using saved session state: {session_file}")
-        context_args["storage_state"] = str(session_file)
-    context = browser.new_context(**context_args)
 
-    # Load cookies (additional - in case session state missing or stale)
-    cookies = _load_cookies()
-    pw_cookies = []
-    for c in cookies:
+    p = sync_playwright().start()
+
+    profile_dir = Path("browser_session/linkedin_persistent_profile")
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    launch_errors = []
+    context = None
+
+    for kwargs in (
+        {"channel": "chrome", "headless": False},
+        {"headless": False},
+    ):
         try:
-            domain = c.get("domain", ".linkedin.com")
-            if not domain.startswith("."):
-                domain = "." + domain.lstrip(".")
-            pw_c = {
-                "name":     c["name"],
-                "value":    c["value"],
-                "domain":   domain,
-                "path":     c.get("path", "/"),
-                "secure":   c.get("secure", True),
-                "httpOnly": c.get("httpOnly", False),
-            }
-            exp = c.get("expirationDate")
-            if exp and not c.get("session"):
-                pw_c["expires"] = int(exp)
-            pw_cookies.append(pw_c)
-        except Exception:
-            continue
-    context.add_cookies(pw_cookies)
-    page = context.new_page()
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                **kwargs,
+                viewport={"width": 1440, "height": 900},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                locale="en-US",
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                    "--no-default-browser-check",
+                    "--disable-gpu",
+                ],
+            )
+            log(f"Persistent browser launch OK: channel={kwargs.get('channel', 'chromium')} headless={kwargs.get('headless')} profile={profile_dir}")
+            break
+        except Exception as e:
+            launch_errors.append(f"{kwargs}: {e}")
+
+    if context is None:
+        raise RuntimeError("Could not launch LinkedIn persistent browser: " + " | ".join(launch_errors))
+
+    page = context.pages[0] if context.pages else context.new_page()
+    page.goto("https://www.linkedin.com/company/68624141/admin/analytics/updates/", wait_until="domcontentloaded", timeout=60000)
+
+    try:
+        page.wait_for_load_state("networkidle", timeout=12000)
+    except Exception:
+        pass
+
+    page.wait_for_timeout(5000)
+
+    current_url = page.url.lower()
+    if "login" in current_url or "uas/" in current_url or "authwall" in current_url or "checkpoint" in current_url or "challenge" in current_url or "flagship-web/login" in current_url:
+        raise RuntimeError(f"Login redirect: {page.url}")
+
+    log(f"Authenticated persistent profile OK: {page.url}")
+
+    class _BrowserProxy:
+        def __init__(self, ctx):
+            self._ctx = ctx
+        def close(self):
+            try:
+                self._ctx.close()
+            except Exception:
+                pass
+
+    browser = _BrowserProxy(context)
     return p, browser, page
 
 
