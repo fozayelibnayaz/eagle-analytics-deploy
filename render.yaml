@@ -23,7 +23,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
+    startCommand: bash scripts/start_streamlit_render.sh
     autoDeploy: true
     envVars:
       - key: MONGO_URI
