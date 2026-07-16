@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import json
 import html
 import re
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
 INPUTS = [
+    Path("data/linkedin_cookies.json"),
+    Path("data_output/linkedin_cookies.json"),
     Path.home() / "Downloads" / "linkedin_cookies.json",
     Path("linkedin_cookies.json"),
 ]
@@ -44,7 +49,6 @@ def clean_obj(obj):
 
 def normalize_cookie(c):
     c = clean_obj(c)
-
     name = unesc(c.get("name"))
     value = unesc(c.get("value"))
     if not name:
@@ -76,6 +80,13 @@ def normalize_cookie(c):
     return fixed
 
 def main():
+    raw_secret = os.environ.get("LINKEDIN_COOKIES_JSON", "").strip()
+    if raw_secret:
+        Path("data").mkdir(exist_ok=True)
+        Path("data_output").mkdir(exist_ok=True)
+        Path("data/linkedin_cookies.json").write_text(raw_secret, encoding="utf-8")
+        Path("data_output/linkedin_cookies.json").write_text(raw_secret, encoding="utf-8")
+
     src = next((p for p in INPUTS if p.exists()), None)
     if src is None:
         print("❌ Could not find input cookie file.")

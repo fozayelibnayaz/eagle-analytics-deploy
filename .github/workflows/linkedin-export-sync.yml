@@ -39,20 +39,6 @@ jobs:
         run: |
           python -m playwright install chromium
 
-      - name: Restore LinkedIn cookies
-        run: |
-          mkdir -p data data_output
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          raw = os.environ.get("LINKEDIN_COOKIES_JSON", "").strip()
-          if not raw:
-              raise SystemExit("LINKEDIN_COOKIES_JSON missing")
-          Path("data/linkedin_cookies.json").write_text(raw, encoding="utf-8")
-          Path("data_output/linkedin_cookies.json").write_text(raw, encoding="utf-8")
-          print("cookies restored")
-          PY
-
       - name: Install/sanitize cookies
         run: |
           python scripts/install_linkedin_cookies_full.py
