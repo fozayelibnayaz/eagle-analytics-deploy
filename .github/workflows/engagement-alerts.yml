@@ -29,6 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install python-calamine xlrd lxml html5lib beautifulsoup4
+      - name: Telegram heartbeat on manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python scripts/send_telegram_test.py
 
       - name: Run engagement alerts
         run: |
