@@ -1,4 +1,92 @@
 from pathlib import Path
+from datetime import datetime
+import json
+import sys
+import re
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from mongo_client import get_raw_db, find_all
+
+# ------------------------------------------------------------
+# PART A: Hard-fix app.py greeting + route aliases
+# ------------------------------------------------------------
+app = ROOT / "app.py"
+if not app.exists():
+    raise SystemExit("❌ app.py not found")
+
+backup_app = ROOT / "backups" / f"app.py.greeting_paid_fix.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+backup_app.write_text(app.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+
+text = app.read_text(encoding="utf-8", errors="ignore")
+
+# Ensure datetime import exists
+if "from datetime import datetime" not in text and "import datetime" not in text:
+    text = "from datetime import datetime\n" + text
+
+# Force stable aliases and fallback greeting before main()
+alias_block = """
+# --- stable runtime fallbacks ---
+def _greeting():
+    try:
+        h = datetime.now().hour
+        return "Good morning" if h < 12 else ("Good afternoon" if h < 18 else "Good evening")
+    except Exception:
+        return "Hello"
+
+try:
+    route
+except NameError:
+    try:
+        route = _route
+    except NameError:
+        pass
+
+try:
+    render_dashboard
+except NameError:
+    try:
+        render_dashboard = _render_dashboard
+    except NameError:
+        try:
+            render_dashboard = render_dashboard_preview
+        except NameError:
+            pass
+"""
+
+if "stable runtime fallbacks" not in text:
+    idx = text.rfind("\nmain()")
+    if idx != -1:
+        text = text[:idx] + "\n\n" + alias_block + "\n" + text[idx:]
+    else:
+        text += "\n\n" + alias_block + "\n"
+
+# fix route call if old alias still used
+text = text.replace("_route(current_page, user_email)", "route(current_page, user_email)")
+
+# strip the weird recurring UI references if present
+text = re.sub(r'.*Recurring Customers.*\n', '', text)
+text = re.sub(r'.*Stopped Recurring.*\n', '', text)
+
+# normalize labels
+text = text.replace("New New Paying Customers", "New Paying Customers")
+text = text.replace("💳 Paid", "💳 New Paying Customers")
+text = text.replace("Paying Customers", "New Paying Customers")
+
+app.write_text(text, encoding="utf-8")
+print(f"✅ app.py patched (backup -> {backup_app})")
+
+# ------------------------------------------------------------
+# PART B: Replace KPI rebuild logic with first-ever-payment logic
+# ------------------------------------------------------------
+script = ROOT / "scripts" / "fix_daily_kpis_safe.py"
+backup_script = ROOT / "backups" / f"fix_daily_kpis_safe.py.first_ever_logic.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+if script.exists():
+    backup_script.write_text(script.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+
+script.write_text(
+'''from pathlib import Path
 from datetime import datetime, date
 import json
 import glob
@@ -189,3 +277,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+''',
+encoding="utf-8")
+print(f"✅ scripts/fix_daily_kpis_safe.py rewritten (backup -> {backup_script})")
+
+print("✅ greeting + paid logic fix bundle complete")

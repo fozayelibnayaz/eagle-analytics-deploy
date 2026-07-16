@@ -1006,7 +1006,7 @@ def _render_dashboard(user_email: str) -> None:
             c1, c2, c3 = st.columns(3)
             c1.metric("👥 Sign-ups",        f"{signups:,}",  _delta(signups, prev_signups))
             c2.metric("📤 First Uploads",   f"{uploads:,}",  _delta(uploads, prev_uploads))
-            c3.metric("💳 New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
+            c3.metric("💳 New New Paying Customers", f"{payments:,}", _delta(payments, prev_payments))
 
         with right:
             # Wallet card
@@ -1413,6 +1413,36 @@ def main() -> None:
 
 
 # --- runtime-safe aliases for dashboard/router ---
+try:
+    route
+except NameError:
+    try:
+        route = _route
+    except NameError:
+        pass
+
+try:
+    render_dashboard
+except NameError:
+    try:
+        render_dashboard = _render_dashboard
+    except NameError:
+        try:
+            render_dashboard = render_dashboard_preview
+        except NameError:
+            pass
+
+
+
+
+# --- stable runtime fallbacks ---
+def _greeting():
+    try:
+        h = datetime.now().hour
+        return "Good morning" if h < 12 else ("Good afternoon" if h < 18 else "Good evening")
+    except Exception:
+        return "Hello"
+
 try:
     route
 except NameError:
