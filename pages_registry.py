@@ -131,9 +131,9 @@ def _render_kpi_dashboard(user_email: str) -> None:
         rows = find_all("daily_kpis",
                         filters={"date": {"$gte": s_iso, "$lte": e_iso}})
         return (
-            sum(int(r.get("signups_accepted", 0) or 0) for r in rows),
-            sum(int(r.get("uploads_accepted", 0) or 0) for r in rows),
-            sum(int(r.get("paid_accepted",    0) or 0) for r in rows),
+            sum(int(r.get("signups", 0) or 0) for r in rows),
+            sum(int(r.get("first_uploads", 0) or 0) for r in rows),
+            sum(int(r.get("new_paid_customers",    0) or 0) for r in rows),
         )
 
     sign, up, pay = _sum_kpis(period.start_iso(), period.end_iso())

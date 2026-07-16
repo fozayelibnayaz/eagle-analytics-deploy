@@ -827,9 +827,9 @@ def _render_dashboard(user_email: str) -> None:
                 rows = find_all("daily_kpis",
                                 filters={"date": {"$gte": start_iso, "$lte": end_iso}},
                                 sort=[("date", 1)])
-                s_ = sum(int(r.get("signups_accepted", 0) or 0) for r in rows)
-                u_ = sum(int(r.get("uploads_accepted", 0) or 0) for r in rows)
-                p_ = sum(int(r.get("paid_accepted",    0) or 0) for r in rows)
+                s_ = sum(int(r.get("signups", 0) or 0) for r in rows)
+                u_ = sum(int(r.get("first_uploads", 0) or 0) for r in rows)
+                p_ = sum(int(r.get("new_paid_customers",    0) or 0) for r in rows)
                 return s_, u_, p_
 
             if db_connected:
@@ -1118,16 +1118,16 @@ def _render_dashboard(user_email: str) -> None:
                 if rows:
                     df = pd.DataFrame(rows)
                     df = df[df["date"].notna()].sort_values("date")
-                    for col in ["signups_accepted", "uploads_accepted", "paid_accepted"]:
+                    for col in ["signups", "first_uploads", "new_paid_customers"]:
                         if col not in df.columns:
                             df[col] = 0
                         df[col] = df[col].fillna(0).astype(int)
 
                     fig = go.Figure()
                     for key, label, color, fill in [
-                        ("signups_accepted", "Sign-ups", "#9EFF2F", "rgba(158,255,47,0.10)"),
-                        ("uploads_accepted", "Uploads",  "#5EF46A", "rgba(94,244,106,0.08)"),
-                        ("paid_accepted",    "Paid",     "#4ADE80", "rgba(74,222,128,0.06)"),
+                        ("signups", "Sign-ups", "#9EFF2F", "rgba(158,255,47,0.10)"),
+                        ("first_uploads", "Uploads",  "#5EF46A", "rgba(94,244,106,0.08)"),
+                        ("new_paid_customers",    "Paid",     "#4ADE80", "rgba(74,222,128,0.06)"),
                     ]:
                         fig.add_trace(go.Scatter(
                             x=df["date"], y=df[key],
