@@ -10,6 +10,9 @@ Analyzes signups, first uploads, and paid customers by:
 - Growth velocity
 """
 import streamlit as st
+DOMAIN_COUNTRY = globals().get("DOMAIN_COUNTRY", {})
+
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
