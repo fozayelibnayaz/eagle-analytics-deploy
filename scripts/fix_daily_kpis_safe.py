@@ -24,7 +24,10 @@ def _as_int(v):
         return 0
 
 def _norm(v):
-    return str(v or "").strip().lower()
+    import re
+    s = str(v or "").strip()
+    m = re.search(r'([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})', s)
+    return m.group(1).lower() if m else s.lower()
 
 def _pick_date(doc, keys):
     for k in keys:

@@ -20,7 +20,10 @@ def _as_float(v):
         return 0.0
 
 def _norm(v):
-    return str(v or "").strip().lower()
+    import re
+    s = str(v or "").strip()
+    m = re.search(r'([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})', s)
+    return m.group(1).lower() if m else s.lower()
 
 def _pick_event_date(doc):
     for k in ("first_payment_date", "payment_date", "created_date", "date"):
