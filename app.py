@@ -1,4 +1,18 @@
 
+
+
+"""
+app.py — Eagle 3D Streaming Analytics Hub
+Premium Monetra-style dark dashboard. MongoDB-only.
+"""
+from __future__ import annotations
+
+import base64
+from datetime import datetime, date
+from pathlib import Path
+
+import streamlit as st
+import streamlit.components.v1 as components
 def _page_href(page_key: str, keep_token: bool = True) -> str:
     qp = st.query_params
     extras = []
@@ -18,18 +32,6 @@ def _page_href(page_key: str, keep_token: bool = True) -> str:
     return "?" + query
 
 
-"""
-app.py — Eagle 3D Streaming Analytics Hub
-Premium Monetra-style dark dashboard. MongoDB-only.
-"""
-from __future__ import annotations
-
-import base64
-from datetime import datetime, date
-from pathlib import Path
-
-import streamlit as st
-import streamlit.components.v1 as components
 
 from period_engine import get_period, get_period_button_label, render_period_picker, PRESETS, COMPARE_MODES
 

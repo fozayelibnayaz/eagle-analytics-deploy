@@ -16,6 +16,8 @@ jobs:
       KPI_PASSWORD: ${{ secrets.KPI_PASSWORD }}
       STRIPE_COOKIES_JSON: ${{ secrets.STRIPE_COOKIES_JSON }}
       FORCE_HISTORICAL: "0"
+      HEADLESS_MODE: "true"
+      PLAYWRIGHT_BROWSERS_PATH: "0"
     steps:
       - uses: actions/checkout@v4
 
