@@ -860,13 +860,16 @@ def _render_dashboard(user_email: str) -> None:
 
                 # Build activity feed (recent events across signups/uploads/payments)
                 recent_sign = find_all("signups",
-                                        filters={"final_status": "ACCEPTED"},
+                                        filters={"final_status": "ACCEPTED",
+                                                 "signup_date": {"$gte": period.start_iso()[:10], "$lte": period.end_iso()[:10]}},
                                         sort=[("signup_date", -1)], limit=6)
                 recent_up = find_all("uploads",
-                                      filters={"final_status": "ACCEPTED"},
+                                      filters={"final_status": "ACCEPTED",
+                                               "upload_date": {"$gte": period.start_iso()[:10], "$lte": period.end_iso()[:10]}},
                                       sort=[("upload_date", -1)], limit=5)
                 recent_pay = find_all("payments",
-                                       filters={"final_status": "ACCEPTED"},
+                                       filters={"final_status": "ACCEPTED",
+                                                "first_payment_date": {"$gte": period.start_iso()[:10], "$lte": period.end_iso()[:10]}},
                                        sort=[("first_payment_date", -1)], limit=5)
 
                 from datetime import datetime as _dt
@@ -1025,7 +1028,7 @@ def _render_dashboard(user_email: str) -> None:
                 title="Revenue Balance",
                 balance=revenue,
                 subtitle=f"{period.label} — {payments} paying customers",
-                holder=(user_email.upper()[:24] if user_email else "EAGLE 3D STREAMING"),
+                holder=(user_email.upper() if user_email else "EAGLE 3D STREAMING"),
             )
             st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
 

@@ -626,3 +626,74 @@ select:focus-visible {
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover { background: #9EFF2F; }
+
+
+
+/* ===== UI responsiveness hotfix ===== */
+
+/* Top nav should not wrap ugly */
+.e3-nav-tabs {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  max-width: calc(100vw - 340px);
+  scrollbar-width: none;
+}
+.e3-nav-tabs::-webkit-scrollbar {
+  display: none;
+}
+.e3-nav-tab {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex: 0 0 auto !important;
+  min-width: 84px !important;
+  white-space: nowrap !important;
+  line-height: 1.1 !important;
+  word-break: keep-all !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* Metric labels should not show broken truncation */
+[data-testid="stMetricLabel"] {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.2 !important;
+  font-size: 11px !important;
+}
+
+/* Wallet / holder text should show full email better */
+.e3-wallet-card,
+.e3-wallet-card-v2 {
+  overflow: hidden !important;
+}
+.e3-wallet-card *,
+.e3-wallet-card-v2 * {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+/* Slightly tighter nav on medium screens */
+@media (max-width: 1400px) {
+  .e3-nav-tabs {
+    max-width: calc(100vw - 260px);
+  }
+  .e3-nav-tab {
+    min-width: 72px !important;
+    padding: 8px 14px !important;
+    font-size: 12px !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .e3-nav-tabs {
+    max-width: calc(100vw - 180px);
+  }
+  .e3-logo-name {
+    font-size: 14px !important;
+  }
+}
+
