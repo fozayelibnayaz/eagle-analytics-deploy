@@ -1,3 +1,48 @@
+from pathlib import Path
+from datetime import datetime
+import textwrap
+
+ROOT = Path.cwd()
+BACKUPS = ROOT / "backups"
+BACKUPS.mkdir(exist_ok=True)
+
+def backup(path: Path):
+    if path.exists():
+        b = BACKUPS / f"{path.name}.linkedin_storage_state_fix.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        b.write_text(path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        print(f"BACKUP: {path} -> {b}")
+
+# 1) write a restore script
+rs = ROOT / "scripts" / "restore_linkedin_auth_files.py"
+rs.write_text(textwrap.dedent("""\
+from pathlib import Path
+import os
+
+Path("data").mkdir(exist_ok=True)
+Path("data_output").mkdir(exist_ok=True)
+
+cookies = os.environ.get("LINKEDIN_COOKIES_JSON", "").strip()
+state = os.environ.get("LINKEDIN_STORAGE_STATE_JSON", "").strip()
+
+if state:
+    Path("data/linkedin_session_state.json").write_text(state, encoding="utf-8")
+    Path("data_output/linkedin_session_state.json").write_text(state, encoding="utf-8")
+    print("✅ Restored LinkedIn storage state from secret")
+
+if cookies:
+    Path("data/linkedin_cookies.json").write_text(cookies, encoding="utf-8")
+    Path("data_output/linkedin_cookies.json").write_text(cookies, encoding="utf-8")
+    print("✅ Restored LinkedIn cookies from secret")
+
+if not state and not cookies:
+    raise SystemExit("❌ Neither LINKEDIN_STORAGE_STATE_JSON nor LINKEDIN_COOKIES_JSON is set")
+"""), encoding="utf-8")
+print("✅ scripts/restore_linkedin_auth_files.py written")
+
+# 2) rewrite workflow
+wf = ROOT / ".github" / "workflows" / "linkedin-export-sync.yml"
+backup(wf)
+wf.write_text(textwrap.dedent("""\
 name: LinkedIn Export Sync
 
 on:
@@ -70,3 +115,5 @@ jobs:
             data_output/linkedin_exports_json
             logs/linkedin_export_sync.out.log
             logs/linkedin_export_sync.err.log
+"""), encoding="utf-8")
+print("✅ linkedin-export-sync.yml upgraded to storage_state + cookies fallback")
