@@ -1,4 +1,48 @@
-name: Cloud Legacy Data Sync
+from pathlib import Path
+from datetime import datetime
+
+ROOT = Path.cwd()
+BACKUPS = ROOT / "backups"
+BACKUPS.mkdir(exist_ok=True)
+
+def backup(path: Path):
+    if path.exists():
+        b = BACKUPS / f"{path.name}.legacy_sync_speed_fix.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        b.write_text(path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        print(f"BACKUP: {path} -> {b}")
+
+# ------------------------------------------------------------
+# 1) Make scrape_stripe.py configurable by env
+# ------------------------------------------------------------
+stripe = ROOT / "scrape_stripe.py"
+if stripe.exists():
+    backup(stripe)
+    text = stripe.read_text(encoding="utf-8", errors="ignore")
+
+    text = text.replace(
+        "MAX_PAGES = 50",
+        'MAX_PAGES = int(os.environ.get("STRIPE_MAX_PAGES", "20"))'
+    )
+    text = text.replace(
+        "PAGE_LOAD_WAIT = 6000  # ms",
+        'PAGE_LOAD_WAIT = int(os.environ.get("STRIPE_PAGE_LOAD_WAIT_MS", "4000"))  # ms'
+    )
+    text = text.replace(
+        "INITIAL_LOAD_WAIT = 12000  # ms — Stripe React app needs time to hydrate",
+        'INITIAL_LOAD_WAIT = int(os.environ.get("STRIPE_INITIAL_LOAD_WAIT_MS", "9000"))  # ms'
+    )
+
+    stripe.write_text(text, encoding="utf-8")
+    print("✅ scrape_stripe.py patched for env-based speed controls")
+else:
+    print("WARN: scrape_stripe.py not found")
+
+# ------------------------------------------------------------
+# 2) Rewrite Cloud Legacy Data Sync workflow
+# ------------------------------------------------------------
+wf = ROOT / ".github" / "workflows" / "cloud-legacy-data-sync.yml"
+backup(wf)
+wf.write_text("""name: Cloud Legacy Data Sync
 
 on:
   workflow_dispatch:
@@ -83,3 +127,5 @@ jobs:
             data_output/debug_stripe_last.png
             data_output/debug_stripe_nav.png
             data_output/debug_stripe_stale.png
+""", encoding="utf-8")
+print("✅ cloud-legacy-data-sync.yml rewritten for timeout/speed/reliability")

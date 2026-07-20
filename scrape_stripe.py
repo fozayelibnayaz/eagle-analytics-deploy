@@ -33,9 +33,9 @@ DATA_DIR.mkdir(exist_ok=True)
 SCRAPE_TS = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 SCRAPE_DATE = datetime.now().strftime("%Y-%m-%d")
 
-MAX_PAGES = 50
-PAGE_LOAD_WAIT = 6000  # ms
-INITIAL_LOAD_WAIT = 12000  # ms — Stripe React app needs time to hydrate
+MAX_PAGES = int(os.environ.get("STRIPE_MAX_PAGES", "20"))
+PAGE_LOAD_WAIT = int(os.environ.get("STRIPE_PAGE_LOAD_WAIT_MS", "4000"))  # ms
+INITIAL_LOAD_WAIT = int(os.environ.get("STRIPE_INITIAL_LOAD_WAIT_MS", "9000"))  # ms
 
 
 def log(msg: str) -> None:
