@@ -153,7 +153,7 @@ def render_dashboard(user_email: str) -> None:
         c1, c2, c3 = st.columns(3)
         c1.metric("👥 Sign-ups", f"{signups:,}", delta(signups, prev_signups))
         c2.metric("�� First Uploads", f"{uploads:,}", delta(uploads, prev_uploads))
-        c3.metric("💳 New New Paying Customers", f"{new_paid:,}", delta(new_paid, prev_new_paid))
+        c3.metric("💳 New Paying Customers", f"{new_paid:,}", delta(new_paid, prev_new_paid))
 
     with right:
         st.metric("💰 Revenue", f"${revenue:,.0f}")
