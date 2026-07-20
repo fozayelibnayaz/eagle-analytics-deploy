@@ -1,4 +1,4 @@
-name: Legacy KPI Cloud Sync
+name: Cloud Legacy Data Sync
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: "0 */6 * * *"
 
 jobs:
-  sync_legacy_kpi:
+  sync_legacy_data:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -43,19 +43,9 @@ jobs:
         run: |
           python -m playwright install chromium
 
-      - name: Restore Stripe cookies from secret
+      - name: Restore Stripe cookies
         run: |
-          mkdir -p data_output
-          python - <<'PY'
-import os
-from pathlib import Path
-raw = os.environ.get("STRIPE_COOKIES_JSON", "").strip()
-if not raw:
-    raise SystemExit("Missing STRIPE_COOKIES_JSON")
-Path("stripe_cookies.json").write_text(raw, encoding="utf-8")
-Path("data_output/stripe_cookies.json").write_text(raw, encoding="utf-8")
-print("✅ Stripe cookies restored")
-PY
+          python scripts/restore_stripe_cookies.py
 
       - name: Scrape KPI dashboard
         run: |
@@ -78,7 +68,7 @@ PY
       - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-kpi-cloud-sync
+          name: cloud-legacy-data-sync
           path: |
             data_output/debug
             data_output/debug_stripe_last.png
