@@ -1,3 +1,23 @@
+from pathlib import Path
+from datetime import datetime
+import textwrap
+
+ROOT = Path.cwd()
+BACKUPS = ROOT / "backups"
+BACKUPS.mkdir(exist_ok=True)
+
+def backup(path: Path):
+    if path.exists():
+        b = BACKUPS / f"{path.name}.linkedin_cookie_only_cloud.{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+        b.write_text(path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+        print(f"BACKUP: {path} -> {b}")
+
+# -------------------------------------------------------------------
+# Rewrite linkedin_export_sync.py to use cookies-only browser context
+# -------------------------------------------------------------------
+les = ROOT / "linkedin_export_sync.py"
+backup(les) if les.exists() else None
+les.write_text(textwrap.dedent("""\
 from __future__ import annotations
 
 import os
@@ -199,3 +219,80 @@ def run_export_sync():
 
 if __name__ == "__main__":
     run_export_sync()
+"""), encoding="utf-8")
+print("✅ linkedin_export_sync.py rewritten for cookie-only cloud mode")
+
+# -------------------------------------------------------------------
+# Rewrite LinkedIn workflow to remove persistent profile step
+# -------------------------------------------------------------------
+wf = ROOT / ".github" / "workflows" / "linkedin-export-sync.yml"
+backup(wf) if wf.exists() else None
+wf.write_text(textwrap.dedent("""\
+name: LinkedIn Export Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */12 * * *"
+
+jobs:
+  sync-linkedin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MONGO_URI: ${{ secrets.MONGO_URI }}
+      MONGO_DB: ${{ secrets.MONGO_DB }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      LINKEDIN_COOKIES_JSON: ${{ secrets.LINKEDIN_COOKIES_JSON }}
+      LINKEDIN_HEADLESS: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install python-calamine xlrd lxml html5lib beautifulsoup4
+
+      - name: Install Playwright Chromium
+        run: |
+          python -m playwright install chromium
+
+      - name: Install/sanitize cookies
+        run: |
+          python scripts/install_linkedin_cookies_full.py
+
+      - name: Run LinkedIn export sync
+        run: |
+          xvfb-run -a python linkedin_export_sync.py
+
+      - name: Import LinkedIn exports
+        run: |
+          python linkedin_import_exports.py
+
+      - name: Transform LinkedIn exports
+        run: |
+          python linkedin_transform_exports.py
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linkedin-export-sync
+          path: |
+            downloads/linkedin_exports
+            data_output/linkedin_exports_json
+"""), encoding="utf-8")
+print("✅ linkedin-export-sync.yml rewritten for cookie-only cloud mode")
+
+print("✅ LinkedIn cookie-only cloud fix complete")
