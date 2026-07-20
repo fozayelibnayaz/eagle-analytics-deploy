@@ -1,10 +1,7 @@
-import json
-import os
-import urllib.request
+import json, os, urllib.request
 
 token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-
 if not token or not chat_id:
     raise SystemExit("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID")
 

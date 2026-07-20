@@ -18,23 +18,19 @@ jobs:
       YOUTUBE_CHANNEL_ID: ${{ secrets.YOUTUBE_CHANNEL_ID }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install python-calamine xlrd lxml html5lib beautifulsoup4
-
       - name: Telegram heartbeat on manual dispatch
         if: github.event_name == 'workflow_dispatch'
         run: |
           python scripts/send_telegram_test.py
-
       - name: Run engagement alerts
         run: |
           python engagement_alerts.py

@@ -25,36 +25,25 @@ import os
 from pathlib import Path
 
 raw = os.environ.get("GA4_SERVICE_ACCOUNT_JSON", "").strip()
-if not raw:
-    raise SystemExit(0)
-
-try:
-    data = json.loads(raw)
-    if not isinstance(data, dict):
-        raise ValueError("GA4_SERVICE_ACCOUNT_JSON is not a JSON object")
-except Exception as e:
-    print(f"WARNING: invalid GA4_SERVICE_ACCOUNT_JSON, skipping injection: {e}")
-    raise SystemExit(0)
-
-p = Path(".streamlit/secrets.toml")
-text = p.read_text(encoding="utf-8")
-text += "\n[ga4_service_account]\n"
-for k, v in data.items():
-    if isinstance(v, str):
-        text += f'{k} = "{v.replace(chr(34), chr(92)+chr(34))}"\n'
-    elif isinstance(v, bool):
-        text += f"{k} = {'true' if v else 'false'}\n"
-    else:
-        text += f"{k} = {json.dumps(v)}\n"
-p.write_text(text, encoding="utf-8")
-print("GA4 service account written to secrets.toml")
+if raw:
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            p = Path(".streamlit/secrets.toml")
+            text = p.read_text(encoding="utf-8")
+            text += "\n[ga4_service_account]\n"
+            for k, v in data.items():
+                if isinstance(v, str):
+                    text += f'{k} = "{v.replace(chr(34), chr(92)+chr(34))}"\n'
+                elif isinstance(v, bool):
+                    text += f"{k} = {'true' if v else 'false'}\n"
+                else:
+                    text += f"{k} = {json.dumps(v)}\n"
+            p.write_text(text, encoding="utf-8")
+            print("GA4 service account written to secrets.toml")
+    except Exception as e:
+        print(f"WARNING: invalid GA4_SERVICE_ACCOUNT_JSON, skipping injection: {e}")
 PY
 fi
-
-echo "== Render Streamlit startup =="
-echo "APP_PASSWORD_PRESENT=$([ -n "${APP_PASSWORD:-}" ] && echo yes || echo no)"
-echo "MONGO_URI_PRESENT=$([ -n "${MONGO_URI:-}" ] && echo yes || echo no)"
-echo "GA4_PROPERTY_ID_PRESENT=$([ -n "${GA4_PROPERTY_ID:-}" ] && echo yes || echo no)"
-echo "GA4_SERVICE_ACCOUNT_JSON_PRESENT=$([ -n "${GA4_SERVICE_ACCOUNT_JSON:-}" ] && echo yes || echo no)"
 
 exec streamlit run app.py   --server.port "$PORT"   --server.address 0.0.0.0   --server.headless true   --browser.gatherUsageStats false

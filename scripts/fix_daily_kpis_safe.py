@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 from datetime import datetime, date
 import json
@@ -8,14 +10,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mongo_client import find_all, get_raw_db
+from kpi_totals_resolver import resolve_paid_breakdown
 
 TODAY = date.today().isoformat()
 MONTH_START = date.today().replace(day=1).isoformat()
 
-def norm_email(v):
-    return str(v or "").strip().lower()
-
-def as_int(v):
+def _as_int(v):
     try:
         if v is None or str(v).strip() == "":
             return 0
@@ -23,15 +23,18 @@ def as_int(v):
     except Exception:
         return 0
 
-def is_accepted(doc):
-    return str(doc.get("final_status", "")).strip().upper() == "ACCEPTED"
+def _norm(v):
+    return str(v or "").strip().lower()
 
-def pick_date(doc, keys):
+def _pick_date(doc, keys):
     for k in keys:
         v = str(doc.get(k, "") or "").strip()
         if v:
             return v[:10]
     return ""
+
+def _is_accepted(doc):
+    return str(doc.get("final_status", "")).strip().upper() == "ACCEPTED"
 
 def latest_daily_kpis_backup():
     candidates = []
@@ -51,32 +54,32 @@ def load_base_daily_kpis():
                 continue
             daymap[d] = {
                 "date": d,
-                "signups": as_int(r.get("signups", 0)),
-                "uploads": as_int(r.get("uploads", r.get("first_uploads", 0))),
-                "first_uploads": as_int(r.get("first_uploads", r.get("uploads", 0))),
+                "signups": _as_int(r.get("signups", 0)),
+                "uploads": _as_int(r.get("uploads", r.get("first_uploads", 0))),
+                "first_uploads": _as_int(r.get("first_uploads", r.get("uploads", 0))),
             }
         return daymap
 
-    # fallback if no backup exists
     daymap = {}
+
     def ensure_day(d):
         if d not in daymap:
             daymap[d] = {"date": d, "_s": set(), "_u": set()}
         return daymap[d]
 
     for s in find_all("signups", {}):
-        if not is_accepted(s):
+        if not _is_accepted(s):
             continue
-        d = pick_date(s, ["signup_date", "account_created_on", "created_date", "date"])
-        e = norm_email(s.get("email") or s.get("email_normalized"))
+        d = _pick_date(s, ["signup_date", "account_created_on", "created_date", "date"])
+        e = _norm(s.get("email") or s.get("email_normalized"))
         if d and e:
             ensure_day(d)["_s"].add(e)
 
     for u in find_all("uploads", {}):
-        if not is_accepted(u):
+        if not _is_accepted(u):
             continue
-        d = pick_date(u, ["upload_date", "first_upload_date", "created_date", "date"])
-        e = norm_email(u.get("email") or u.get("email_normalized"))
+        d = _pick_date(u, ["upload_date", "first_upload_date", "created_date", "date"])
+        e = _norm(u.get("email") or u.get("email_normalized"))
         if d and e:
             ensure_day(d)["_u"].add(e)
 
@@ -90,60 +93,35 @@ def load_base_daily_kpis():
         }
     return final
 
-def build_payment_maps():
-    payments = [p for p in find_all("payments", {}) if is_accepted(p)]
+def build_recurring_maps():
+    breakdown_by_day = {}
+    rows = find_all("payments", {})
+    accepted_rows = [r for r in rows if _is_accepted(r)]
 
-    # build event rows
-    rows = []
-    for p in payments:
-        d = pick_date(p, ["first_payment_date", "payment_date", "created_date", "date"])
-        email = norm_email(p.get("email") or p.get("email_normalized"))
-        if not d or not email:
-            continue
-        rows.append({
-            "date": d,
-            "email": email,
-            "status": str(
-                p.get("subscription_status")
-                or p.get("status")
-                or p.get("plan_status")
-                or p.get("customer_status")
-                or ""
-            ).strip().lower(),
-        })
+    from kpi_totals_resolver import _all_payment_events, _first_paid_map
+    events, first_paid = _first_paid_map()
 
-    rows.sort(key=lambda x: (x["date"], x["email"]))
+    stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
 
-    # first-ever accepted payment date per email
-    first_paid = {}
-    for r in rows:
-        if r["email"] not in first_paid:
-            first_paid[r["email"]] = r["date"]
-
-    new_by_day = {}
-    recurring_by_day = {}
-    stopped_by_day = {}
+    new_map = {}
+    recurring_map = {}
+    stopped_map = {}
 
     def add(mapper, d, email):
         mapper.setdefault(d, set()).add(email)
 
-    stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
-
-    for r in rows:
-        d = r["date"]
-        email = r["email"]
-
-        if first_paid[email] == d:
-            add(new_by_day, d, email)
+    for e in events:
+        d = e["date"]
+        email = e["email"]
+        if first_paid.get(email) == d:
+            add(new_map, d, email)
         else:
-            add(recurring_by_day, d, email)
+            add(recurring_map, d, email)
 
-        if r["status"] in stop_statuses:
-            # only meaningful if not first-ever payer
-            if first_paid[email] < d:
-                add(stopped_by_day, d, email)
+        if e["status"] in stop_statuses and first_paid.get(email, d) < d:
+            add(stopped_map, d, email)
 
-    return new_by_day, recurring_by_day, stopped_by_day
+    return new_map, recurring_map, stopped_map
 
 def main():
     db = get_raw_db()
@@ -151,25 +129,29 @@ def main():
         raise SystemExit("MongoDB not available")
 
     base = load_base_daily_kpis()
-    new_by_day, recurring_by_day, stopped_by_day = build_payment_maps()
+    new_by_day, recurring_by_day, stopped_by_day = build_recurring_maps()
 
     all_dates = set(base.keys()) | set(new_by_day.keys()) | set(recurring_by_day.keys()) | set(stopped_by_day.keys())
     rows = []
 
     for d in sorted(all_dates):
         b = base.get(d, {"date": d, "signups": 0, "uploads": 0, "first_uploads": 0})
+        new_c = len(new_by_day.get(d, set()))
+        rec_c = len(recurring_by_day.get(d, set()))
+        stop_c = len(stopped_by_day.get(d, set()))
+
         rows.append({
             "date": d,
-            "signups": as_int(b.get("signups", 0)),
-            "uploads": as_int(b.get("uploads", b.get("first_uploads", 0))),
-            "first_uploads": as_int(b.get("first_uploads", b.get("uploads", 0))),
-            "paid_customers": len(new_by_day.get(d, set())),
-            "new_paid_customers": len(new_by_day.get(d, set())),
-            "recurring_customers": len(recurring_by_day.get(d, set())),
-            "stopped_recurring_customers": len(stopped_by_day.get(d, set())),
-            "total_paying_customers": len(new_by_day.get(d, set())) + len(recurring_by_day.get(d, set())),
-            "payments": len(new_by_day.get(d, set())),
-            "source": "daily_kpis_safe_fix_first_ever_payment_logic",
+            "signups": _as_int(b.get("signups", 0)),
+            "uploads": _as_int(b.get("uploads", b.get("first_uploads", 0))),
+            "first_uploads": _as_int(b.get("first_uploads", b.get("uploads", 0))),
+            "paid_customers": new_c,
+            "new_paid_customers": new_c,
+            "recurring_customers": rec_c,
+            "stopped_recurring_customers": stop_c,
+            "total_paying_customers": new_c + rec_c,
+            "payments": new_c,
+            "source": "daily_kpis_safe_fix",
             "rebuilt_at": datetime.utcnow().isoformat(),
         })
 
@@ -179,12 +161,12 @@ def main():
 
     month_rows = [r for r in rows if MONTH_START <= r["date"] <= TODAY]
     print(json.dumps({
-        "month_signups": sum(as_int(r["signups"]) for r in month_rows),
-        "month_first_uploads": sum(as_int(r["first_uploads"]) for r in month_rows),
-        "month_new_paid_customers": sum(as_int(r["new_paid_customers"]) for r in month_rows),
-        "month_recurring_customers": sum(as_int(r["recurring_customers"]) for r in month_rows),
-        "month_stopped_recurring_customers": sum(as_int(r["stopped_recurring_customers"]) for r in month_rows),
-        "month_total_paying_customers": sum(as_int(r["total_paying_customers"]) for r in month_rows),
+        "month_signups": sum(_as_int(r["signups"]) for r in month_rows),
+        "month_first_uploads": sum(_as_int(r["first_uploads"]) for r in month_rows),
+        "month_new_paid_customers": sum(_as_int(r["new_paid_customers"]) for r in month_rows),
+        "month_recurring_customers": sum(_as_int(r["recurring_customers"]) for r in month_rows),
+        "month_stopped_recurring_customers": sum(_as_int(r["stopped_recurring_customers"]) for r in month_rows),
+        "month_total_paying_customers": sum(_as_int(r["total_paying_customers"]) for r in month_rows),
     }, indent=2))
 
 if __name__ == "__main__":
