@@ -17,26 +17,3 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-
-  - type: web
-    name: eagle-analytics-ui
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: bash scripts/start_streamlit_render.sh
-    autoDeploy: true
-    envVars:
-      - key: MONGO_URI
-        sync: false
-      - key: MONGO_DB
-        value: eagle3d
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: YOUTUBE_API_KEY
-        sync: false
-      - key: YOUTUBE_CHANNEL_ID
-        sync: false
-      - key: APP_PASSWORD
-        sync: false
