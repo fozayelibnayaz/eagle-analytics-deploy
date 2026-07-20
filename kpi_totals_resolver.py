@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple, Dict, List
+from typing import Tuple, Dict
 from mongo_client import find_all
 
 def _as_int(v):
@@ -22,15 +22,22 @@ def _as_float(v):
 def _norm(v):
     return str(v or "").strip().lower()
 
-def _pick_date(doc, keys):
-    for k in keys:
+def _pick_event_date(doc):
+    for k in ("first_payment_date", "payment_date", "created_date", "date"):
+        v = str(doc.get(k, "") or "").strip()
+        if v:
+            return v[:10]
+    return ""
+
+def _pick_first_ever_date(doc):
+    for k in ("first_ever_payment_date", "first_payment_date", "payment_date", "created_date", "date"):
         v = str(doc.get(k, "") or "").strip()
         if v:
             return v[:10]
     return ""
 
 def _pick_amount(doc):
-    for k in ("amount", "total_spend", "paid_amount", "invoice_amount"):
+    for k in ("amount", "total_spend", "paid_amount", "invoice_amount", "first_ever_amount"):
         v = doc.get(k)
         if v not in (None, "", 0, "0"):
             return _as_float(v)
@@ -50,7 +57,7 @@ def _all_payment_events():
         "sheet_raw_stripe",
     ]
 
-    events = []
+    rows = []
     seen = set()
 
     for col in collections:
@@ -64,24 +71,27 @@ def _all_payment_events():
                 continue
 
             email = _norm(d.get("email") or d.get("email_normalized"))
-            dt = _pick_date(d, ["first_payment_date", "payment_date", "created_date", "date"])
-            amt = _pick_amount(d)
-            if not email or not dt or amt <= 0:
+            event_date = _pick_event_date(d)
+            first_ever_date = _pick_first_ever_date(d)
+            amount = _pick_amount(d)
+
+            if not email or not event_date or amount <= 0:
                 continue
 
-            # Exclude obvious synthetic/test data
+            # exclude known synthetic test emails
             if email.endswith("@example.com") or "webhook-test" in email or "cloud-test" in email:
                 continue
 
-            sig = (email, dt, round(amt, 2))
+            sig = (email, event_date, round(amount, 2))
             if sig in seen:
                 continue
             seen.add(sig)
 
-            events.append({
+            rows.append({
                 "email": email,
-                "date": dt,
-                "amount": amt,
+                "event_date": event_date,
+                "first_ever_date": first_ever_date or event_date,
+                "amount": amount,
                 "status": str(
                     d.get("subscription_status")
                     or d.get("status")
@@ -93,34 +103,28 @@ def _all_payment_events():
                 "id": d.get("id"),
             })
 
-    events.sort(key=lambda x: (x["email"], x["date"], x["collection"]))
-    return events
-
-def _first_paid_map():
-    events = _all_payment_events()
-    first_paid = {}
-    for e in events:
-        first_paid.setdefault(e["email"], e["date"])
-    return events, first_paid
+    rows.sort(key=lambda x: (x["email"], x["event_date"], x["collection"]))
+    return rows
 
 def resolve_period_kpis(start_iso: str, end_iso: str) -> Tuple[int, int, int]:
     start_day = str(start_iso or "")[:10]
     end_day = str(end_iso or "")[:10]
 
-    rows = find_all(
+    daily = find_all(
         "daily_kpis",
         filters={"date": {"$gte": start_day, "$lte": end_day}},
         sort=[("date", 1)],
         limit=10000,
     )
 
-    signups = sum(_as_int(r.get("signups", 0)) for r in rows)
-    uploads = sum(_as_int(r.get("first_uploads", r.get("uploads", 0))) for r in rows)
+    signups = sum(_as_int(r.get("signups", 0)) for r in daily)
+    uploads = sum(_as_int(r.get("first_uploads", r.get("uploads", 0))) for r in daily)
 
-    events, first_paid = _first_paid_map()
+    events = _all_payment_events()
     new_paid = len({
         e["email"] for e in events
-        if start_day <= e["date"] <= end_day and first_paid.get(e["email"]) == e["date"]
+        if start_day <= e["event_date"] <= end_day
+        and e["first_ever_date"] == e["event_date"]
     })
 
     return signups, uploads, new_paid
@@ -128,23 +132,22 @@ def resolve_period_kpis(start_iso: str, end_iso: str) -> Tuple[int, int, int]:
 def resolve_paid_breakdown(start_iso: str, end_iso: str) -> Dict[str, int]:
     start_day = str(start_iso or "")[:10]
     end_day = str(end_iso or "")[:10]
-
-    events, first_paid = _first_paid_map()
     stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
 
+    events = _all_payment_events()
     new_set = set()
     recurring_set = set()
     stopped_set = set()
 
     for e in events:
-        if not (start_day <= e["date"] <= end_day):
+        if not (start_day <= e["event_date"] <= end_day):
             continue
-        if first_paid.get(e["email"]) == e["date"]:
+        if e["first_ever_date"] == e["event_date"]:
             new_set.add(e["email"])
         else:
             recurring_set.add(e["email"])
 
-        if e["status"] in stop_statuses and first_paid.get(e["email"], e["date"]) < e["date"]:
+        if e["status"] in stop_statuses and e["first_ever_date"] < e["event_date"]:
             stopped_set.add(e["email"])
 
     return {

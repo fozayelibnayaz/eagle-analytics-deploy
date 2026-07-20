@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from mongo_client import find_all, get_raw_db
-from kpi_totals_resolver import resolve_paid_breakdown
+from kpi_totals_resolver import _all_payment_events
 
 TODAY = date.today().isoformat()
 MONTH_START = date.today().replace(day=1).isoformat()
@@ -93,14 +93,8 @@ def load_base_daily_kpis():
         }
     return final
 
-def build_recurring_maps():
-    breakdown_by_day = {}
-    rows = find_all("payments", {})
-    accepted_rows = [r for r in rows if _is_accepted(r)]
-
-    from kpi_totals_resolver import _all_payment_events, _first_paid_map
-    events, first_paid = _first_paid_map()
-
+def build_payment_maps():
+    events = _all_payment_events()
     stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
 
     new_map = {}
@@ -111,14 +105,15 @@ def build_recurring_maps():
         mapper.setdefault(d, set()).add(email)
 
     for e in events:
-        d = e["date"]
+        d = e["event_date"]
         email = e["email"]
-        if first_paid.get(email) == d:
+
+        if e["first_ever_date"] == e["event_date"]:
             add(new_map, d, email)
         else:
             add(recurring_map, d, email)
 
-        if e["status"] in stop_statuses and first_paid.get(email, d) < d:
+        if e["status"] in stop_statuses and e["first_ever_date"] < e["event_date"]:
             add(stopped_map, d, email)
 
     return new_map, recurring_map, stopped_map
@@ -129,7 +124,7 @@ def main():
         raise SystemExit("MongoDB not available")
 
     base = load_base_daily_kpis()
-    new_by_day, recurring_by_day, stopped_by_day = build_recurring_maps()
+    new_by_day, recurring_by_day, stopped_by_day = build_payment_maps()
 
     all_dates = set(base.keys()) | set(new_by_day.keys()) | set(recurring_by_day.keys()) | set(stopped_by_day.keys())
     rows = []
