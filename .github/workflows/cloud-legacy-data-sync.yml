@@ -67,9 +67,9 @@ jobs:
         run: |
           python scripts/run_process_data_pipeline.py
 
-      - name: Rebuild daily_kpis fast
+      - name: Rebuild daily_kpis safe
         run: |
-          python scripts/fix_daily_kpis_fast.py
+          python scripts/fix_daily_kpis_safe.py
 
       - name: Upload debug artifacts (non-blocking)
         if: always()

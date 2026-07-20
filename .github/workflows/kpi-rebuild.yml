@@ -26,6 +26,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Rebuild daily_kpis fast
+      - name: Rebuild daily_kpis safe
         run: |
-          python scripts/fix_daily_kpis_fast.py
+          python scripts/fix_daily_kpis_safe.py

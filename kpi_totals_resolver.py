@@ -109,6 +109,16 @@ def _all_payment_events():
     rows.sort(key=lambda x: (x["email"], x["event_date"], x["collection"]))
     return rows
 
+def _first_ever_map(events):
+    first_ever = {}
+    for e in events:
+        email = e["email"]
+        dt = min(e["event_date"], e.get("first_ever_date") or e["event_date"])
+        prev = first_ever.get(email)
+        if prev is None or dt < prev:
+            first_ever[email] = dt
+    return first_ever
+
 def resolve_period_kpis(start_iso: str, end_iso: str) -> Tuple[int, int, int]:
     start_day = str(start_iso or "")[:10]
     end_day = str(end_iso or "")[:10]
@@ -124,11 +134,13 @@ def resolve_period_kpis(start_iso: str, end_iso: str) -> Tuple[int, int, int]:
     uploads = sum(_as_int(r.get("first_uploads", r.get("uploads", 0))) for r in daily)
 
     events = _all_payment_events()
-    new_paid = len({
-        e["email"] for e in events
+    first_ever = _first_ever_map(events)
+    paid_in_period = {
+        e["email"]
+        for e in events
         if start_day <= e["event_date"] <= end_day
-        and e["first_ever_date"] == e["event_date"]
-    })
+    }
+    new_paid = sum(1 for email in paid_in_period if start_day <= first_ever.get(email, "9999-99-99") <= end_day)
 
     return signups, uploads, new_paid
 
@@ -138,20 +150,22 @@ def resolve_paid_breakdown(start_iso: str, end_iso: str) -> Dict[str, int]:
     stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
 
     events = _all_payment_events()
-    new_set = set()
-    recurring_set = set()
+    first_ever = _first_ever_map(events)
+    in_period = {}
     stopped_set = set()
 
     for e in events:
         if not (start_day <= e["event_date"] <= end_day):
             continue
-        if e["first_ever_date"] == e["event_date"]:
-            new_set.add(e["email"])
-        else:
-            recurring_set.add(e["email"])
+        email = e["email"]
+        prev = in_period.get(email)
+        if prev is None or e["event_date"] < prev:
+            in_period[email] = e["event_date"]
+        if e["status"] in stop_statuses and first_ever.get(email, e["event_date"]) < e["event_date"]:
+            stopped_set.add(email)
 
-        if e["status"] in stop_statuses and e["first_ever_date"] < e["event_date"]:
-            stopped_set.add(e["email"])
+    new_set = {email for email in in_period if start_day <= first_ever.get(email, "9999-99-99") <= end_day}
+    recurring_set = {email for email in in_period if first_ever.get(email, "") < start_day}
 
     return {
         "new_paid_customers": len(new_set),

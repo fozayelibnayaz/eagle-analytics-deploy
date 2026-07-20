@@ -16,7 +16,7 @@ jobs:
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       LINKEDIN_COOKIES_JSON: ${{ secrets.LINKEDIN_COOKIES_JSON }}
       LINKEDIN_STORAGE_STATE_JSON: ${{ secrets.LINKEDIN_STORAGE_STATE_JSON }}
-      LINKEDIN_HEADLESS: "true"
+      LINKEDIN_HEADLESS: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -62,11 +62,18 @@ jobs:
           python linkedin_transform_exports.py
 
       - name: Upload artifacts
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: linkedin-export-sync
+          if-no-files-found: ignore
           path: |
             downloads/linkedin_exports
             data_output/linkedin_exports_json
+            data/linkedin_storage_state_runtime.json
+            data_output/linkedin_storage_state_runtime.json
+            data/linkedin_cookies_runtime.json
+            data_output/linkedin_cookies_runtime.json
             logs/linkedin_export_sync.out.log
             logs/linkedin_export_sync.err.log

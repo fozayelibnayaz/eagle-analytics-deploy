@@ -101,24 +101,37 @@ def build_payment_maps():
     events = _all_payment_events()
     stop_statuses = {"cancelled", "canceled", "expired", "inactive", "past_due", "unpaid", "stopped"}
 
-    new_map = {}
-    recurring_map = {}
+    first_ever = {}
+    first_in_month = {}
     stopped_map = {}
 
     def add(mapper, d, email):
         mapper.setdefault(d, set()).add(email)
 
     for e in events:
-        d = e["event_date"]
         email = e["email"]
+        event_day = e["event_date"]
+        candidate_first = min(event_day, e.get("first_ever_date") or event_day)
 
-        if e["first_ever_date"] == e["event_date"]:
-            add(new_map, d, email)
-        else:
-            add(recurring_map, d, email)
+        prev = first_ever.get(email)
+        if prev is None or candidate_first < prev:
+            first_ever[email] = candidate_first
 
-        if e["status"] in stop_statuses and e["first_ever_date"] < e["event_date"]:
-            add(stopped_map, d, email)
+        if MONTH_START <= event_day <= TODAY:
+            prev_month = first_in_month.get(email)
+            if prev_month is None or event_day < prev_month:
+                first_in_month[email] = event_day
+
+        if e["status"] in stop_statuses and candidate_first < event_day:
+            add(stopped_map, event_day, email)
+
+    new_map = {}
+    recurring_map = {}
+    for email, event_day in first_in_month.items():
+        if MONTH_START <= first_ever.get(email, "9999-99-99") <= TODAY:
+            add(new_map, event_day, email)
+        elif first_ever.get(email, "") < MONTH_START:
+            add(recurring_map, event_day, email)
 
     return new_map, recurring_map, stopped_map
 

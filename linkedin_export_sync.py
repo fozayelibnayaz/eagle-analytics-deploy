@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-from linkedin_cookie_bootstrap import apply_cookie_editor_cookies
+from linkedin_cookie_bootstrap import apply_cookie_editor_cookies, prime_linkedin_auth, save_runtime_auth
 
 EXPORT_DIR = Path("downloads/linkedin_exports")
 COMPANY_ID = "68624141"
@@ -28,6 +28,13 @@ BAD_MARKERS = (
     "authwall",
 )
 
+STATE_PATHS = [
+    Path("data/linkedin_session_state.json"),
+    Path("data_output/linkedin_session_state.json"),
+    Path("data/linkedin_storage_state_runtime.json"),
+    Path("data_output/linkedin_storage_state_runtime.json"),
+]
+
 def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] [LI-export] {msg}", flush=True)
 
@@ -47,6 +54,37 @@ def close_noise(page) -> None:
         page.keyboard.press("Escape")
     except Exception:
         pass
+
+def pick_storage_state_path() -> Path | None:
+    for path in STATE_PATHS:
+        try:
+            if path.exists() and path.read_text(encoding="utf-8", errors="ignore").strip():
+                return path
+        except Exception:
+            continue
+    return None
+
+def build_context(browser):
+    common = dict(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        viewport={"width": 1440, "height": 900},
+        locale="en-US",
+        accept_downloads=True,
+    )
+
+    state_path = pick_storage_state_path()
+    if state_path:
+        try:
+            context = browser.new_context(storage_state=str(state_path), **common)
+            log(f"Loaded storage_state from {state_path}")
+            return context, f"storage_state:{state_path}"
+        except Exception as e:
+            log(f"Storage state load failed ({state_path}): {e}")
+
+    context = browser.new_context(**common)
+    count, source = apply_cookie_editor_cookies(context)
+    log(f"Applied {count} cookies from {source}")
+    return context, f"cookies:{source}"
 
 def filename_from_ambry_url(url: str, dataset_key: str) -> str:
     try:
@@ -144,58 +182,94 @@ def export_one_dataset(context, dataset_key: str, url: str) -> Path:
         except Exception:
             pass
 
-def run_export_sync():
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    headless = str(os.environ.get("LINKEDIN_HEADLESS", "true")).strip().lower() == "true"
+def launch_browser(p, headless: bool):
+    log(f"Launching Chromium headless={headless}")
+    return p.chromium.launch(
+        headless=headless,
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-default-browser-check",
+            "--disable-gpu",
+        ],
+    )
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=headless)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1440, "height": 900},
-            locale="en-US",
-            accept_downloads=True,
-        )
-
-        count, source = apply_cookie_editor_cookies(context)
-        log(f"Applied {count} cookies from {source}")
+def run_once(p, headless: bool):
+    browser = launch_browser(p, headless=headless)
+    context = None
+    try:
+        context, auth_mode = build_context(browser)
+        log(f"Auth bootstrap mode: {auth_mode}")
 
         downloaded = []
         failed = []
 
+        page = context.new_page()
         try:
-            for dataset_key, url in PAGES.items():
-                try:
-                    out = export_one_dataset(context, dataset_key, url)
-                    downloaded.append(str(out))
-                except Exception as e:
-                    failed.append({"dataset": dataset_key, "error": str(e)})
-                    log(f"FAILED dataset={dataset_key}: {e}")
-
-            print()
-            print("Downloaded files:")
-            for f in downloaded:
-                print(" -", f)
-
-            if failed:
-                print()
-                print("Failed datasets:")
-                for f in failed:
-                    print(f" - {f['dataset']}: {f['error']}")
-
-            if not downloaded:
-                raise RuntimeError("No LinkedIn export files were downloaded")
-
-            return downloaded
+            ok, final_url = prime_linkedin_auth(page, company_id=COMPANY_ID)
+            log(f"Prime auth result: ok={ok} url={final_url}")
+            save_runtime_auth(context)
+            if not ok:
+                raise RuntimeError(f"LinkedIn authwall after bootstrap: {final_url}")
         finally:
             try:
-                context.close()
+                page.close()
             except Exception:
                 pass
+
+        for dataset_key, url in PAGES.items():
             try:
-                browser.close()
-            except Exception:
-                pass
+                out = export_one_dataset(context, dataset_key, url)
+                downloaded.append(str(out))
+            except Exception as e:
+                failed.append({"dataset": dataset_key, "error": str(e)})
+                log(f"FAILED dataset={dataset_key}: {e}")
+
+        print()
+        print("Downloaded files:")
+        for f in downloaded:
+            print(" -", f)
+
+        if failed:
+            print()
+            print("Failed datasets:")
+            for f in failed:
+                print(f" - {f['dataset']}: {f['error']}")
+
+        if not downloaded:
+            raise RuntimeError("No LinkedIn export files were downloaded")
+
+        return downloaded
+    finally:
+        try:
+            if context is not None:
+                context.close()
+        except Exception:
+            pass
+        try:
+            browser.close()
+        except Exception:
+            pass
+
+def run_export_sync():
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    requested_headless = str(os.environ.get("LINKEDIN_HEADLESS", "true")).strip().lower() == "true"
+
+    with sync_playwright() as p:
+        attempts = [requested_headless]
+        if requested_headless:
+            attempts.append(False)
+
+        errors = []
+        for headless in attempts:
+            try:
+                return run_once(p, headless=headless)
+            except Exception as e:
+                msg = f"headless={headless}: {e}"
+                errors.append(msg)
+                log(f"RUN FAILED {msg}")
+
+        raise RuntimeError(" | ".join(errors))
 
 if __name__ == "__main__":
     run_export_sync()

@@ -10,6 +10,8 @@ state = os.environ.get("LINKEDIN_STORAGE_STATE_JSON", "").strip()
 if state:
     Path("data/linkedin_session_state.json").write_text(state, encoding="utf-8")
     Path("data_output/linkedin_session_state.json").write_text(state, encoding="utf-8")
+    Path("data/linkedin_storage_state_runtime.json").write_text(state, encoding="utf-8")
+    Path("data_output/linkedin_storage_state_runtime.json").write_text(state, encoding="utf-8")
     print("✅ Restored LinkedIn storage state from secret")
 
 if cookies:
