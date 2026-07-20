@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 from mongo_client import find_all, get_raw_db
 from kpi_totals_resolver import _all_payment_events
+from source_cutover_resolver import get_cutover_date, is_countable_signup, is_countable_upload
 
 TODAY = date.today().isoformat()
 MONTH_START = date.today().replace(day=1).isoformat()
@@ -75,7 +76,7 @@ def load_base_daily_kpis():
             continue
         d = _pick_date(s, ["signup_date", "account_created_on", "created_date", "date"])
         e = _norm(s.get("email") or s.get("email_normalized"))
-        if d and e:
+        if d and e and is_countable_signup(s, d):
             ensure_day(d)["_s"].add(e)
 
     for u in find_all("uploads", {}):
@@ -83,7 +84,7 @@ def load_base_daily_kpis():
             continue
         d = _pick_date(u, ["upload_date", "first_upload_date", "created_date", "date"])
         e = _norm(u.get("email") or u.get("email_normalized"))
-        if d and e:
+        if d and e and is_countable_upload(u, d):
             ensure_day(d)["_u"].add(e)
 
     final = {}
@@ -126,6 +127,8 @@ def main():
     if db is None:
         raise SystemExit("MongoDB not available")
 
+    cutover = get_cutover_date()
+    print(f"Cutover date = {cutover}")
     base = load_base_daily_kpis()
     new_by_day, recurring_by_day, stopped_by_day = build_payment_maps()
 
