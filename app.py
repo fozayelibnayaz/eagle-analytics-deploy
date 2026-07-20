@@ -1,3 +1,23 @@
+
+def _page_href(page_key: str, keep_token: bool = True) -> str:
+    qp = st.query_params
+    extras = []
+
+    def _one(v):
+        if isinstance(v, list):
+            return v[0] if v else ""
+        return str(v or "")
+
+    if keep_token:
+        for key in ("t", "prd", "cmp"):
+            val = _one(qp.get(key, ""))
+            if val:
+                extras.append(f"{key}={val}")
+
+    query = "&".join([f"page={page_key}"] + extras)
+    return "?" + query
+
+
 """
 app.py — Eagle 3D Streaming Analytics Hub
 Premium Monetra-style dark dashboard. MongoDB-only.
@@ -594,7 +614,7 @@ def _render_chrome(current_page: str, user_email: str) -> None:
     ]
     tabs_html = "".join(
         f'<a class="e3-nav-tab{" active" if k == current_page else ""}" '
-        f'href="?page={k}" target="_top">{lbl}</a>'
+        f'href="{_page_href(k)}" target="_self">{lbl}</a>'
         for k, lbl in top_nav
     )
     initial = (user_email[0].upper() if user_email else "A")
@@ -603,7 +623,7 @@ def _render_chrome(current_page: str, user_email: str) -> None:
     def _sbtn(k, ic, lbl, active):
         cls = "e3-side-btn" + (" active" if active else "")
         return (
-            f'<a class="{cls}" href="?page={k}" '
+            f'<a class="{cls}" href="{_page_href(k, keep_token=(k != "_logout"))}" '
             f'target="_top" title="{lbl}">{ic}</a>'
         )
 
@@ -619,7 +639,7 @@ def _render_chrome(current_page: str, user_email: str) -> None:
     chrome_html = f"""
     <div id="e3-topbar" class="e3-topbar">
       <div class="e3-toggle-btn" id="e3-toggle" title="Toggle sidebar">☰</div>
-      <a class="e3-logo" href="?page=dashboard" target="_top">
+      <a class="e3-logo" href="{_page_href('dashboard')}" target="_self">
         <div class="e3-logo-icon">{logo_html}</div>
         <span class="e3-logo-name">{BRAND_NAME}</span>
       </a>
@@ -627,7 +647,7 @@ def _render_chrome(current_page: str, user_email: str) -> None:
       <div class="e3-nav-actions">
         <div id="e3-period-mount" class="e3-period-mount"></div>
         <div class="e3-icon-btn notif" title="Notifications">🔔</div>
-        <a class="e3-icon-btn" href="?page=settings" target="_top" title="Settings">⚙</a>
+        <a class="e3-icon-btn" href="{_page_href('settings')}" target="_self" title="Settings">⚙</a>
         <div class="e3-avatar" title="{user_email}">{initial}</div>
       </div>
     </div>
