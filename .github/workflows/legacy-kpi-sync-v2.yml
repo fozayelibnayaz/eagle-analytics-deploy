@@ -1,4 +1,4 @@
-name: Legacy KPI Sync
+name: Legacy KPI Sync v2
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
     - cron: "0 */6 * * *"
 
 jobs:
-  sync-legacy-kpi:
+  sync_legacy_kpi:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -19,7 +19,8 @@ jobs:
       HEADLESS_MODE: "true"
       PLAYWRIGHT_BROWSERS_PATH: "0"
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -76,7 +77,7 @@ PY
       - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: legacy-kpi-sync
+          name: legacy-kpi-sync-v2
           path: |
             data_output/debug
             data_output/debug_stripe_last.png
