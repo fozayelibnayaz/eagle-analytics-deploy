@@ -1,45 +1,61 @@
 from __future__ import annotations
 
-import json, html, re, os
+import json
+import html
+import re
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
 INPUTS = [
     Path("data/linkedin_cookies.json"),
     Path("data_output/linkedin_cookies.json"),
-    Path.home() / "Downloads" / "linkedin_cookies.json"),
+    Path.home() / "Downloads" / "linkedin_cookies.json",
     Path("linkedin_cookies.json"),
 ]
-OUTS = [Path("data/linkedin_cookies.json"), Path("data_output/linkedin_cookies.json")]
-IMPORTANT = ["li_at","JSESSIONID","bcookie","bscookie","PLAY_SESSION","fptctx2"]
 
-def unesc(v): return html.unescape(str(v or "")).strip()
+OUTS = [
+    Path("data/linkedin_cookies.json"),
+    Path("data_output/linkedin_cookies.json"),
+]
+
+IMPORTANT = ["li_at", "JSESSIONID", "bcookie", "bscookie", "PLAY_SESSION", "fptctx2"]
+
+def unesc(v):
+    return html.unescape(str(v or "")).strip()
 
 def extract_host(raw: str) -> str:
     s = unesc(raw).strip('"').strip("'")
     m = re.search(r'((?:www\.)?linkedin\.com)\b', s, re.I)
-    if m: return m.group(1).lower()
+    if m:
+        return m.group(1).lower()
     if s.startswith("http://") or s.startswith("https://"):
         try:
             p = urlparse(s)
-            if p.netloc: return p.netloc.lower()
+            if p.netloc:
+                return p.netloc.lower()
         except Exception:
             pass
     return s.strip("/").lstrip(".").lower()
 
 def clean_obj(obj):
-    if isinstance(obj, dict): return {k: clean_obj(v) for k, v in obj.items()}
-    if isinstance(obj, list): return [clean_obj(x) for x in obj]
-    if isinstance(obj, str): return html.unescape(obj)
+    if isinstance(obj, dict):
+        return {k: clean_obj(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [clean_obj(x) for x in obj]
+    if isinstance(obj, str):
+        return html.unescape(obj)
     return obj
 
 def normalize_cookie(c):
     c = clean_obj(c)
     name = unesc(c.get("name"))
     value = unesc(c.get("value"))
-    if not name: return None
+    if not name:
+        return None
     domain = extract_host(c.get("domain", ""))
-    if not domain: return None
+    if not domain:
+        return None
     fixed = dict(c)
     fixed["name"] = name
     fixed["value"] = value
