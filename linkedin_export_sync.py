@@ -64,7 +64,33 @@ def pick_storage_state_path() -> Path | None:
             continue
     return None
 
-def build_context(browser):
+def build_context(browser, mode: str = "auto"):
+    common = dict(
+        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        viewport={"width": 1440, "height": 900},
+        locale="en-US",
+        accept_downloads=True,
+    )
+
+    state_path = pick_storage_state_path()
+
+    if mode in ("auto", "storage_state") and state_path:
+        try:
+            context = browser.new_context(storage_state=str(state_path), **common)
+            log(f"Loaded storage_state from {state_path}")
+            return context, f"storage_state:{state_path}"
+        except Exception as e:
+            log(f"Storage state load failed ({state_path}): {e}")
+            if mode == "storage_state":
+                raise
+
+    if mode in ("auto", "cookies"):
+        context = browser.new_context(**common)
+        count, source = apply_cookie_editor_cookies(context)
+        log(f"Applied {count} cookies from {source}")
+        return context, f"cookies:{source}"
+
+    raise RuntimeError(f"No LinkedIn auth bootstrap path available for mode={mode}")
     common = dict(
         user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         viewport={"width": 1440, "height": 900},
@@ -195,6 +221,87 @@ def launch_browser(p, headless: bool):
     )
 
 def run_once(p, headless: bool):
+    browser = launch_browser(p, headless=headless)
+    context = None
+    auth_attempt_errors = []
+
+    def try_auth_mode(mode: str):
+        nonlocal context
+        if context is not None:
+            try:
+                context.close()
+            except Exception:
+                pass
+            context = None
+
+        context, auth_mode = build_context(browser, mode=mode)
+        log(f"Auth bootstrap mode: {auth_mode}")
+
+        page = context.new_page()
+        try:
+            ok, final_url = prime_linkedin_auth(page, company_id=COMPANY_ID)
+            log(f"Prime auth result: ok={ok} url={final_url}")
+            save_runtime_auth(context)
+            if not ok:
+                raise RuntimeError(f"LinkedIn authwall after bootstrap: {final_url}")
+            return auth_mode
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+
+    try:
+        auth_mode_used = None
+
+        # Try storage_state first, then cookies-only fallback if LinkedIn rejects it
+        for mode in ("storage_state", "cookies"):
+            try:
+                auth_mode_used = try_auth_mode(mode)
+                break
+            except Exception as e:
+                auth_attempt_errors.append(f"{mode}: {e}")
+                log(f"Auth bootstrap failed for mode={mode}: {e}")
+
+        if auth_mode_used is None:
+            raise RuntimeError(" | ".join(auth_attempt_errors))
+
+        downloaded = []
+        failed = []
+
+        for dataset_key, url in PAGES.items():
+            try:
+                out = export_one_dataset(context, dataset_key, url)
+                downloaded.append(str(out))
+            except Exception as e:
+                failed.append({"dataset": dataset_key, "error": str(e)})
+                log(f"FAILED dataset={dataset_key}: {e}")
+
+        print()
+        print("Downloaded files:")
+        for f in downloaded:
+            print(" -", f)
+
+        if failed:
+            print()
+            print("Failed datasets:")
+            for f in failed:
+                print(f" - {f['dataset']}: {f['error']}")
+
+        if not downloaded:
+            raise RuntimeError("No LinkedIn export files were downloaded")
+
+        return downloaded
+    finally:
+        try:
+            if context is not None:
+                context.close()
+        except Exception:
+            pass
+        try:
+            browser.close()
+        except Exception:
+            pass
     browser = launch_browser(p, headless=headless)
     context = None
     try:
