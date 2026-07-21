@@ -25,6 +25,8 @@ if not MONGO_URI:
 client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=10000)
 db = client[MONGO_DB]
 
+BD_TZ = ZoneInfo("Asia/Dhaka")
+
 
 class WebhookItem(BaseModel):
     type: str
@@ -68,12 +70,15 @@ def normalize_username(v: Any) -> str:
     return str(v or "").strip().lower()
 
 
+def local_now() -> datetime:
+    return datetime.now(BD_TZ)
+
 def pick_day(*values: Any) -> str:
     for v in values:
         s = str(v or "").strip()
         if s:
             return s[:10]
-    return datetime.utcnow().date().isoformat()
+    return local_now().date().isoformat()
 
 
 def month_key(day: str) -> str:
@@ -90,7 +95,7 @@ def add_month(yyyy_mm: str) -> str:
 
 
 def now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return local_now().isoformat()
 
 
 def require_key(x_api_key: str | None):
@@ -409,7 +414,7 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
                 "type": "signup",
                 "info": {
                     "lead_source": "Google",
-                    "signup_date": datetime.utcnow().date().isoformat(),
+                    "signup_date": local_now().date().isoformat(),
                     "email": "demo.user@company.com",
                     "username": "demouser"
                 }
@@ -420,7 +425,7 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
                     "username": "demouser",
                     "appname": "Demo",
                     "lead_source": "Google",
-                    "upload_date": datetime.utcnow().date().isoformat()
+                    "upload_date": local_now().date().isoformat()
                 }
             },
             {
@@ -429,7 +434,7 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
                     "username": "demouser",
                     "amount": 70,
                     "subscription": "Pre Paid Minute",
-                    "payment_date": datetime.utcnow().date().isoformat()
+                    "payment_date": local_now().date().isoformat()
                 }
             }
         ]
