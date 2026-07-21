@@ -10,9 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from pymongo import MongoClient
+from pymongo import MongoClient, ASCENDING
 
-APP = FastAPI(title="Eagle Analytics Webhook API", version="2.0.0")
+APP = FastAPI(title="Eagle Analytics Webhook API", version="3.0.0")
 
 MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 MONGO_DB = os.environ.get("MONGO_DB", "eagle3d").strip()
@@ -39,39 +39,34 @@ class WebhookPayload(BaseModel):
     data: List[WebhookItem]
 
 
-def send_telegram(msg: str) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
+def ensure_indexes() -> None:
     try:
-        payload = json.dumps({
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": msg,
-            "parse_mode": "Markdown",
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode())
-            return bool(body.get("ok"))
+        db["signups"].create_index([("email_normalized", ASCENDING)])
+        db["signups"].create_index([("username_normalized", ASCENDING)])
+        db["username_registry"].create_index([("username_normalized", ASCENDING)], unique=True)
+        db["username_registry"].create_index([("email_normalized", ASCENDING)])
+        db["uploads"].create_index([("username_normalized", ASCENDING)])
+        db["payments"].create_index([("username_normalized", ASCENDING)])
+        db["payment_history"].create_index([("email_normalized", ASCENDING)], unique=True)
+        db["signups_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["uploads_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["payments_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["webhook_unresolved"].create_index([("received_at", ASCENDING)])
+        db["webhook_log"].create_index([("received_at", ASCENDING)])
     except Exception:
-        return False
+        pass
 
 
-def normalize_email(v: Any) -> str:
-    s = str(v or "").strip().replace("mailto:", "")
-    m = re.search(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", s)
-    return m.group(1).lower() if m else s.lower()
-
-def normalize_username(v: Any) -> str:
-    return str(v or "").strip().lower()
+ensure_indexes()
 
 
 def local_now() -> datetime:
     return datetime.now(BD_TZ)
+
+
+def now_iso() -> str:
+    return local_now().isoformat()
+
 
 def pick_day(*values: Any) -> str:
     for v in values:
@@ -94,8 +89,66 @@ def add_month(yyyy_mm: str) -> str:
     return f"{y:04d}-{m+1:02d}"
 
 
-def now_iso() -> str:
-    return local_now().isoformat()
+def normalize_email(v: Any) -> str:
+    s = str(v or "").strip().replace("mailto:", "")
+    m = re.search(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", s)
+    return m.group(1).lower() if m else s.lower()
+
+
+def normalize_username(v: Any) -> str:
+    return str(v or "").strip().lower()
+
+
+def send_telegram(msg: str) -> bool:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": msg,
+            "parse_mode": "Markdown",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode())
+            return bool(body.get("ok"))
+    except Exception:
+        return False
+
+
+def send_error_alert(source: str, errors: List[Dict[str, Any]]) -> None:
+    if not errors:
+        return
+
+    lines = [
+        "⚠️ *Webhook Error Alert*",
+        f"Source: `{source}`",
+        f"Errors: *{len(errors)}*",
+        ""
+    ]
+
+    for i, err in enumerate(errors[:10], start=1):
+        kind = err.get("kind") or err.get("type") or "unknown"
+        reason = str(err.get("error") or err.get("reason") or "unknown error")
+        username = str(err.get("username") or err.get("info", {}).get("username") or "")
+        email = str(err.get("email") or err.get("info", {}).get("email") or "")
+        lines.append(f"*{i}. kind:* `{kind}`")
+        if username:
+            lines.append(f"username: `{username}`")
+        if email:
+            lines.append(f"email: `{email}`")
+        lines.append(f"reason: `{reason[:300]}`")
+        raw = json.dumps(err.get("info", {}), ensure_ascii=False)[:500]
+        if raw:
+            lines.append(f"payload: `{raw}`")
+        lines.append("")
+
+    send_telegram("\n".join(lines))
 
 
 def require_key(x_api_key: str | None):
@@ -107,10 +160,11 @@ def require_key(x_api_key: str | None):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 
-def find_signup_by_username(username_normalized: str) -> Optional[Dict[str, Any]]:
-    if not username_normalized:
-        return None
-    return db["signups"].find_one({"username_normalized": username_normalized})
+def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
+    doc = dict(payload or {})
+    doc["_id"] = doc_id
+    doc["received_at"] = now_iso()
+    db[collection].update_one({"_id": doc_id}, {"$set": doc}, upsert=True)
 
 
 def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -119,28 +173,77 @@ def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dic
         "source": source,
         "reason": reason,
         "info": dict(info or {}),
+        "username": normalize_username((info or {}).get("username")),
+        "email": normalize_email((info or {}).get("email")),
         "received_at": now_iso(),
     }
     db["webhook_unresolved"].insert_one(doc)
-    return {"ok": False, "error": reason}
+    return {"ok": False, "kind": kind, "error": reason, "info": dict(info or {})}
 
 
-def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
-    doc = dict(payload or {})
-    doc["_id"] = doc_id
-    doc["received_at"] = now_iso()
-    db[collection].update_one({"_id": doc_id}, {"$set": doc}, upsert=True)
+def upsert_username_registry(source: str, email: str, username: str, signup_date: str, lead_source: Any = None) -> None:
+    username_normalized = normalize_username(username)
+    email_normalized = normalize_email(email)
+
+    db["username_registry"].update_one(
+        {"username_normalized": username_normalized},
+        {
+            "$set": {
+                "username": username,
+                "username_normalized": username_normalized,
+                "email": email_normalized,
+                "email_normalized": email_normalized,
+                "lead_source": lead_source,
+                "signup_date": signup_date,
+                "source": source,
+                "updated_at": now_iso(),
+            }
+        },
+        upsert=True,
+    )
+
+
+def find_signup_by_username(username_normalized: str) -> Optional[Dict[str, Any]]:
+    if not username_normalized:
+        return None
+    return db["signups"].find_one({"username_normalized": username_normalized})
 
 
 def signup_lookup(username: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     uname = normalize_username(username)
+    if not uname:
+        return None, "username missing"
+
+    reg = db["username_registry"].find_one({"username_normalized": uname})
+    if reg:
+        email = normalize_email(reg.get("email") or reg.get("email_normalized"))
+        if email:
+            return {
+                "email": email,
+                "email_normalized": email,
+                "username": reg.get("username") or uname,
+                "username_normalized": uname,
+                "signup_date": str(reg.get("signup_date") or "")[:10],
+                "lead_source": reg.get("lead_source"),
+            }, None
+
     signup = find_signup_by_username(uname)
-    if not signup:
-        return None, f"username not mapped to a signup yet: {uname}"
-    email = normalize_email(signup.get("email") or signup.get("email_normalized"))
-    if not email:
-        return None, f"signup exists but email is missing for username: {uname}"
-    return signup, None
+    if signup:
+        email = normalize_email(signup.get("email") or signup.get("email_normalized"))
+        if email:
+            return signup, None
+
+    return None, f"username not mapped to a signup yet: {uname}"
+
+
+def parse_amount(v: Any) -> Optional[float]:
+    try:
+        amt = float(v)
+        if amt <= 0:
+            return None
+        return amt
+    except Exception:
+        return None
 
 
 def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,9 +253,9 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     signup_date = pick_day(info.get("signup_date"), info.get("created_at"), info.get("date"))
 
     if not email:
-        return {"ok": False, "error": "signup missing email"}
+        return unresolved("signup", source, info, "signup missing email")
     if not username_normalized:
-        return {"ok": False, "error": "signup missing username"}
+        return unresolved("signup", source, info, "signup missing username")
 
     existing = db["signups"].find_one({
         "$or": [
@@ -177,6 +280,14 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     db["signups"].update_one(selector, {"$set": doc}, upsert=True)
 
+    upsert_username_registry(
+        source=source,
+        email=email,
+        username=username,
+        signup_date=signup_date,
+        lead_source=info.get("lead_source"),
+    )
+
     mirror_doc(
         "signups_webhook",
         f"signup|{username_normalized}|{signup_date}",
@@ -194,6 +305,7 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     return {"ok": True, "email": email, "username": username_normalized}
 
+
 def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     username = str(info.get("username") or "").strip()
     username_normalized = normalize_username(username)
@@ -202,6 +314,8 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     if not username_normalized:
         return unresolved("upload", source, info, "upload missing username")
+    if not app_name:
+        return unresolved("upload", source, info, "upload missing appname")
 
     signup, err = signup_lookup(username_normalized)
     if err:
@@ -232,7 +346,7 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     mirror_doc(
         "uploads_webhook",
-        f"upload|{username_normalized}|{upload_date}|{app_name or 'app-na'}",
+        f"upload|{username_normalized}|{upload_date}|{app_name}",
         {
             "type": "upload",
             "username": username,
@@ -245,6 +359,7 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     return {"ok": True, "email": email, "username": username_normalized, "app_name": app_name}
+
 
 def classify_payment(history: Optional[Dict[str, Any]], payment_date: str) -> Dict[str, Any]:
     history = history or {}
@@ -304,7 +419,7 @@ def classify_payment(history: Optional[Dict[str, Any]], payment_date: str) -> Di
 def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     username = str(info.get("username") or "").strip()
     username_normalized = normalize_username(username)
-    amount = float(info.get("amount", 0) or 0)
+    amount = parse_amount(info.get("amount"))
     subscription = str(info.get("subscription") or info.get("plan") or info.get("product") or "").strip()
     payment_date = pick_day(
         info.get("payment_date"),
@@ -316,8 +431,10 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     if not username_normalized:
         return unresolved("payment", source, info, "payment missing username")
-    if amount <= 0:
+    if amount is None:
         return unresolved("payment", source, info, "payment missing/invalid amount")
+    if not subscription:
+        return unresolved("payment", source, info, "payment missing subscription")
 
     signup, err = signup_lookup(username_normalized)
     if err:
@@ -329,7 +446,7 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     payment_id = (
         str(info.get("payment_id") or info.get("invoice_id") or info.get("charge_id") or info.get("id") or "").strip()
-        or f"{username_normalized}|{payment_date}|{amount:.2f}|{subscription or 'subscription-na'}"
+        or f"{username_normalized}|{payment_date}|{amount:.2f}|{subscription}"
     )
 
     existing_event = db["payments"].find_one({"_id": payment_id}, {"_id": 1})
@@ -438,8 +555,6 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @APP.get("/")
-
-@APP.get("/")
 def root():
     return {
         "ok": True,
@@ -493,6 +608,8 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
         ]
     }
 
+
+@APP.get("/webhook/log")
 def webhook_log(limit: int = Query(default=20, ge=1, le=200), x_api_key: str | None = Header(default=None, alias="X-API-Key")):
     require_key(x_api_key)
     rows = list(db["webhook_log"].find({}, {"_id": 0}).sort("received_at", -1).limit(limit))
@@ -516,31 +633,44 @@ def webhook(payload: WebhookPayload, x_api_key: str | None = Header(default=None
         kind = str(item.type or "").strip().lower()
         info = dict(item.info or {})
 
-        if kind == "signup":
-            res = upsert_signup(source, info)
-            if res.get("ok"):
-                processed["signups"] += 1
-                results["signups"].append(res)
-            else:
-                results["errors"].append(res)
+        try:
+            if kind == "signup":
+                res = upsert_signup(source, info)
+                if res.get("ok"):
+                    processed["signups"] += 1
+                    results["signups"].append(res)
+                else:
+                    results["errors"].append(res)
 
-        elif kind == "upload":
-            res = upsert_upload(source, info)
-            if res.get("ok"):
-                processed["uploads"] += 1
-                results["uploads"].append(res)
-            else:
-                results["errors"].append(res)
+            elif kind == "upload":
+                res = upsert_upload(source, info)
+                if res.get("ok"):
+                    processed["uploads"] += 1
+                    results["uploads"].append(res)
+                else:
+                    results["errors"].append(res)
 
-        elif kind == "payment":
-            res = upsert_payment(source, info)
-            if res.get("ok"):
-                processed["payments"] += 1
-                results["payments"].append(res)
+            elif kind == "payment":
+                res = upsert_payment(source, info)
+                if res.get("ok"):
+                    processed["payments"] += 1
+                    results["payments"].append(res)
+                else:
+                    results["errors"].append(res)
             else:
-                results["errors"].append(res)
-        else:
-            results["errors"].append({"ok": False, "error": f"unknown type: {kind}"})
+                results["errors"].append({
+                    "ok": False,
+                    "kind": kind,
+                    "error": f"unknown type: {kind}",
+                    "info": info,
+                })
+        except Exception as e:
+            results["errors"].append({
+                "ok": False,
+                "kind": kind,
+                "error": f"internal_processing_error: {e}",
+                "info": info,
+            })
 
     received_at = now_iso()
     log_doc = {
@@ -559,8 +689,12 @@ def webhook(payload: WebhookPayload, x_api_key: str | None = Header(default=None
             f"Signups: *{processed['signups']}*\\n"
             f"Uploads: *{processed['uploads']}*\\n"
             f"Payments: *{processed['payments']}*\\n"
+            f"Errors: *{len(results['errors'])}*\\n"
             f"Time: `{received_at}`"
         )
+
+    if results["errors"]:
+        send_error_alert(source, results["errors"])
 
     return {
         "success": len(results["errors"]) == 0,
