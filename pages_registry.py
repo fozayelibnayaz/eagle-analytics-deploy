@@ -211,42 +211,65 @@ def _render_kpi_dashboard(user_email: str) -> None:
 
 
 def _render_browse_data() -> None:
-    """Browse + EDIT raw data — Google Sheets-style inline editing."""
+    """Browse webhook-shaped data only."""
     st.markdown('<p class="e3-section-title">Browse & Edit Data</p>',
                 unsafe_allow_html=True)
-    st.caption("Edit any cell inline. Add or delete rows. "
-                "Changes save to MongoDB in real-time and are audit-logged.")
+    st.caption("Shows webhook-formatted records only. Changes save to MongoDB in real-time and are audit-logged.")
 
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        source = st.selectbox("Source",
-                                ["signups", "uploads", "payments"],
-                                key="browse_source_edit")
+    source = st.selectbox(
+        "Source",
+        ["signups", "uploads", "payments"],
+        key="browse_source_edit",
+    )
 
     user_email = st.session_state.get("user_email", "")
 
+    collection_map = {
+        "signups": "signups_webhook",
+        "uploads": "uploads_webhook",
+        "payments": "payments_webhook",
+    }
+
     display_cols_map = {
-        "signups": ["email_normalized", "signup_date", "lead_source",
-                    "final_status", "reason", "is_overridden"],
-        "uploads": ["email_normalized", "upload_date", "signup_date",
-                    "days_signup_to_upload", "final_status", "reason",
-                    "is_overridden"],
-        "payments":["email_normalized", "first_payment_date", "total_spend",
-                    "customer_type", "final_status", "reason"],
+        "signups": [
+            "username",
+            "email",
+            "lead_source",
+            "signup_date",
+            "source",
+            "received_at",
+        ],
+        "uploads": [
+            "username",
+            "appname",
+            "upload_date",
+            "email",
+            "source",
+            "received_at",
+        ],
+        "payments": [
+            "username",
+            "amount",
+            "subscription",
+            "payment_date",
+            "customer_type",
+            "lifecycle_label",
+            "email",
+            "source",
+            "received_at",
+        ],
     }
 
     render_editable_table(
-        collection=source,
+        collection=collection_map.get(source, source),
         user_email=user_email,
-        key_field="email_normalized",
+        key_field="_id",
         display_columns=display_cols_map.get(source),
         max_rows=500,
     )
 
-    # ── Audit log expander ──
     with st.expander("📋 Recent edits audit log"):
         render_audit_log(user_email=user_email, limit=30)
-
 
 def _render_eda_lab() -> None:
     """Exploratory Data Analysis."""

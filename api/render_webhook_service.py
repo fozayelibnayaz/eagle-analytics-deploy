@@ -62,10 +62,9 @@ def send_telegram(msg: str) -> bool:
 
 
 def normalize_email(v: Any) -> str:
-    s = str(v or "").strip()
+    s = str(v or "").strip().replace("mailto:", "")
     m = re.search(r"([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})", s)
     return m.group(1).lower() if m else s.lower()
-
 
 def normalize_username(v: Any) -> str:
     return str(v or "").strip().lower()
@@ -126,6 +125,13 @@ def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dic
     return {"ok": False, "error": reason}
 
 
+def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
+    doc = dict(payload or {})
+    doc["_id"] = doc_id
+    doc["received_at"] = now_iso()
+    db[collection].update_one({"_id": doc_id}, {"$set": doc}, upsert=True)
+
+
 def signup_lookup(username: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     uname = normalize_username(username)
     signup = find_signup_by_username(uname)
@@ -170,8 +176,23 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     })
 
     db["signups"].update_one(selector, {"$set": doc}, upsert=True)
-    return {"ok": True, "email": email, "username": username_normalized}
 
+    mirror_doc(
+        "signups_webhook",
+        f"signup|{username_normalized}|{signup_date}",
+        {
+            "source": source,
+            "type": "signup",
+            "username": username,
+            "username_normalized": username_normalized,
+            "email": email,
+            "email_normalized": email,
+            "lead_source": info.get("lead_source"),
+            "signup_date": signup_date,
+        },
+    )
+
+    return {"ok": True, "email": email, "username": username_normalized}
 
 def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     username = str(info.get("username") or "").strip()
@@ -187,7 +208,6 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         return unresolved("upload", source, info, err)
 
     email = normalize_email(signup.get("email") or signup.get("email_normalized"))
-    lead_source = info.get("lead_source") or signup.get("lead_source")
 
     doc = dict(info)
     doc.update({
@@ -200,7 +220,6 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "upload_date": upload_date,
         "app_name": app_name,
         "source": source,
-        "lead_source": lead_source,
         "final_status": "ACCEPTED",
         "_updated_at": now_iso(),
     })
@@ -210,8 +229,23 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         {"$set": doc},
         upsert=True,
     )
-    return {"ok": True, "email": email, "username": username_normalized, "app_name": app_name}
 
+    mirror_doc(
+        "uploads_webhook",
+        f"upload|{username_normalized}|{upload_date}|{app_name or 'app-na'}",
+        {
+            "source": source,
+            "type": "upload",
+            "username": username,
+            "username_normalized": username_normalized,
+            "email": email,
+            "email_normalized": email,
+            "appname": app_name,
+            "upload_date": upload_date,
+        },
+    )
+
+    return {"ok": True, "email": email, "username": username_normalized, "app_name": app_name}
 
 def classify_payment(history: Optional[Dict[str, Any]], payment_date: str) -> Dict[str, Any]:
     history = history or {}
@@ -369,6 +403,25 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         upsert=True,
     )
 
+    mirror_doc(
+        "payments_webhook",
+        payment_id,
+        {
+            "source": source,
+            "type": "payment",
+            "username": username,
+            "username_normalized": username_normalized,
+            "email": email,
+            "email_normalized": email,
+            "amount": amount,
+            "subscription": subscription,
+            "payment_date": payment_date,
+            "currency": "USD",
+            "customer_type": classification["customer_type"],
+            "lifecycle_label": classification["lifecycle_label"],
+        },
+    )
+
     warning = None
     if not any(info.get(k) for k in ("payment_date", "first_payment_date", "paid_at", "created_at", "date")):
         warning = f"payment_date missing in payload; defaulted to {payment_date}"
@@ -384,6 +437,8 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "warning": warning,
     }
 
+
+@APP.get("/")
 
 @APP.get("/")
 def root():
@@ -425,7 +480,6 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
                 "info": {
                     "username": "demouser",
                     "appname": "Demo",
-                    "lead_source": "Google",
                     "upload_date": local_now().date().isoformat()
                 }
             },
@@ -434,15 +488,12 @@ def webhook_test(x_api_key: str | None = Header(default=None, alias="X-API-Key")
                 "info": {
                     "username": "demouser",
                     "amount": 70,
-                    "subscription": "Pre Paid Minute",
-                    "payment_date": local_now().date().isoformat()
+                    "subscription": "Pre Paid Minute"
                 }
             }
         ]
     }
 
-
-@APP.get("/webhook/log")
 def webhook_log(limit: int = Query(default=20, ge=1, le=200), x_api_key: str | None = Header(default=None, alias="X-API-Key")):
     require_key(x_api_key)
     rows = list(db["webhook_log"].find({}, {"_id": 0}).sort("received_at", -1).limit(limit))
