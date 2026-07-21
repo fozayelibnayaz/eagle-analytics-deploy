@@ -244,7 +244,6 @@ def _render_browse_data() -> None:
             "appname",
             "upload_date",
             "email",
-            "source",
             "received_at",
         ],
         "payments": [

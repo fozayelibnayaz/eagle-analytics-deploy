@@ -234,7 +234,6 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "uploads_webhook",
         f"upload|{username_normalized}|{upload_date}|{app_name or 'app-na'}",
         {
-            "source": source,
             "type": "upload",
             "username": username,
             "username_normalized": username_normalized,
