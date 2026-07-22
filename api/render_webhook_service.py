@@ -110,35 +110,116 @@ def send_telegram(msg: str) -> bool:
         return False
 
 
-def send_error_alert(source: str, errors: List[Dict[str, Any]]) -> None:
+def pretty_time(iso_value: str) -> str:
+    s = str(iso_value or "").strip()
+    if not s:
+        return "unknown time"
+    try:
+        dt = datetime.fromisoformat(s)
+        return dt.strftime("%Y-%m-%d %H:%M (%Z)") if dt.tzinfo else dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return s
+
+def kind_label(kind: str) -> str:
+    k = str(kind or "").strip().lower()
+    return {
+        "signup": "Sign-up",
+        "upload": "Project upload",
+        "payment": "Payment",
+    }.get(k, k or "Unknown")
+
+def humanize_error(reason: str) -> str:
+    r = str(reason or "").strip()
+
+    if "signup missing email" in r:
+        return "The sign-up data did not include an email address."
+    if "signup missing username" in r:
+        return "The sign-up data did not include a username."
+    if "upload missing username" in r:
+        return "The project upload data did not include a username."
+    if "upload missing appname" in r:
+        return "The project upload data did not include the project/app name."
+    if "payment missing username" in r:
+        return "The payment data did not include a username."
+    if "payment missing/invalid amount" in r:
+        return "The payment amount was missing or invalid."
+    if "payment missing subscription" in r:
+        return "The payment data did not include the subscription name."
+    if "username not mapped to a signup yet" in r:
+        return "This username is not linked to any saved sign-up yet. Please send the sign-up data first or make sure the username already exists in the system."
+    if "duplicate key error" in r:
+        return "This record already exists in an older format in the database. The system tried to insert it again instead of updating the existing record."
+    if "internal_processing_error" in r:
+        return "The server received the data, but processing failed internally. Please check the payload fields and the server logs."
+    return r[:400]
+
+def send_success_alert(source: str, processed: Dict[str, int], results: Dict[str, Any], received_at: str) -> None:
+    success_items = []
+    success_items.extend(results.get("signups", []))
+    success_items.extend(results.get("uploads", []))
+    success_items.extend(results.get("payments", []))
+
+    duplicates = sum(1 for item in success_items if item.get("duplicate"))
+    warnings = [str(item.get("warning")) for item in success_items if item.get("warning")]
+    failed = len(results.get("errors", []))
+
+    lines = [
+        "✅ *Webhook Update Received*",
+        "",
+        f"Source: `{source}`",
+        f"Time: `{pretty_time(received_at)}`",
+        "",
+        "*Saved successfully:*",
+        f"• Sign-ups: *{processed.get('signups', 0)}*",
+        f"• Project uploads: *{processed.get('uploads', 0)}*",
+        f"• Payments: *{processed.get('payments', 0)}*",
+        "",
+        "*Also handled safely:*",
+        f"• Existing records updated from replay/history: *{duplicates}*",
+        f"• Failed records: *{failed}*",
+    ]
+
+    if warnings:
+        lines.append(f"• Automatic fallback values used: *{len(warnings)}*")
+
+    if failed == 0:
+        lines.append("")
+        lines.append("Everything received in this webhook call was handled successfully.")
+
+    send_telegram("\n".join(lines))
+
+def send_error_alert(source: str, errors: List[Dict[str, Any]], received_at: str) -> None:
     if not errors:
         return
 
     lines = [
-        "⚠️ *Webhook Error Alert*",
+        "⚠️ *Some webhook records could not be saved*",
+        "",
         f"Source: `{source}`",
-        f"Errors: *{len(errors)}*",
+        f"Time: `{pretty_time(received_at)}`",
+        f"Problem count: *{len(errors)}*",
         ""
     ]
 
     for i, err in enumerate(errors[:10], start=1):
-        kind = err.get("kind") or err.get("type") or "unknown"
-        reason = str(err.get("error") or err.get("reason") or "unknown error")
-        username = str(err.get("username") or err.get("info", {}).get("username") or "")
-        email = str(err.get("email") or err.get("info", {}).get("email") or "")
-        lines.append(f"*{i}. kind:* `{kind}`")
+        kind = kind_label(err.get("kind") or err.get("type") or "unknown")
+        username = str(err.get("username") or err.get("info", {}).get("username") or "").strip()
+        email = str(err.get("email") or err.get("info", {}).get("email") or "").strip()
+        reason = humanize_error(err.get("error") or err.get("reason") or "unknown error")
+
+        lines.append(f"*{i}) {kind}*")
         if username:
-            lines.append(f"username: `{username}`")
+            lines.append(f"• Username: `{username}`")
         if email:
-            lines.append(f"email: `{email}`")
-        lines.append(f"reason: `{reason[:300]}`")
-        raw = json.dumps(err.get("info", {}), ensure_ascii=False)[:500]
+            lines.append(f"• Email: `{email}`")
+        lines.append(f"• Issue: {reason}")
+
+        raw = json.dumps(err.get("info", {}), ensure_ascii=False)[:300]
         if raw:
-            lines.append(f"payload: `{raw}`")
+            lines.append(f"• Payload: `{raw}`")
         lines.append("")
 
     send_telegram("\n".join(lines))
-
 
 def require_key(x_api_key: str | None):
     if not WEBHOOK_API_KEY:
@@ -729,18 +810,10 @@ def webhook(payload: WebhookPayload, x_api_key: str | None = Header(default=None
     db["webhook_log"].insert_one(log_doc)
 
     if processed["signups"] or processed["uploads"] or processed["payments"]:
-        send_telegram(
-            f"🔔 *Webhook Sync*\\n"
-            f"Source: `{source}`\\n"
-            f"Signups: *{processed['signups']}*\\n"
-            f"Uploads: *{processed['uploads']}*\\n"
-            f"Payments: *{processed['payments']}*\\n"
-            f"Errors: *{len(results['errors'])}*\\n"
-            f"Time: `{received_at}`"
-        )
+        send_success_alert(source, processed, results, received_at)
 
     if results["errors"]:
-        send_error_alert(source, results["errors"])
+        send_error_alert(source, results["errors"], received_at)
 
     return {
         "success": len(results["errors"]) == 0,
