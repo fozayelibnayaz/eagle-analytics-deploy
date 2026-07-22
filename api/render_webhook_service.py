@@ -12,7 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo import MongoClient, ASCENDING
 
-APP = FastAPI(title="Eagle Analytics Webhook API", version="3.0.0")
+APP = FastAPI(title="Eagle Analytics Webhook API", version="4.0.0")
 
 MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 MONGO_DB = os.environ.get("MONGO_DB", "eagle3d").strip()
@@ -37,27 +37,6 @@ class WebhookItem(BaseModel):
 class WebhookPayload(BaseModel):
     source: str = "unknown"
     data: List[WebhookItem]
-
-
-def ensure_indexes() -> None:
-    try:
-        db["signups"].create_index([("email_normalized", ASCENDING)])
-        db["signups"].create_index([("username_normalized", ASCENDING)])
-        db["username_registry"].create_index([("username_normalized", ASCENDING)], unique=True)
-        db["username_registry"].create_index([("email_normalized", ASCENDING)])
-        db["uploads"].create_index([("username_normalized", ASCENDING)])
-        db["payments"].create_index([("username_normalized", ASCENDING)])
-        db["payment_history"].create_index([("email_normalized", ASCENDING)], unique=True)
-        db["signups_webhook"].create_index([("username_normalized", ASCENDING)])
-        db["uploads_webhook"].create_index([("username_normalized", ASCENDING)])
-        db["payments_webhook"].create_index([("username_normalized", ASCENDING)])
-        db["webhook_unresolved"].create_index([("received_at", ASCENDING)])
-        db["webhook_log"].create_index([("received_at", ASCENDING)])
-    except Exception:
-        pass
-
-
-ensure_indexes()
 
 
 def local_now() -> datetime:
@@ -97,6 +76,16 @@ def normalize_email(v: Any) -> str:
 
 def normalize_username(v: Any) -> str:
     return str(v or "").strip().lower()
+
+
+def parse_amount(v: Any) -> Optional[float]:
+    try:
+        amt = float(v)
+        if amt <= 0:
+            return None
+        return amt
+    except Exception:
+        return None
 
 
 def send_telegram(msg: str) -> bool:
@@ -160,6 +149,51 @@ def require_key(x_api_key: str | None):
         raise HTTPException(status_code=403, detail="Invalid API key")
 
 
+def drop_unique_index_if_exists(coll_name: str, index_name: str) -> None:
+    try:
+        for idx in db[coll_name].list_indexes():
+            if idx.get("name") == index_name and idx.get("unique"):
+                db[coll_name].drop_index(index_name)
+                break
+    except Exception:
+        pass
+
+
+def ensure_indexes() -> None:
+    try:
+        # remove legacy unique indexes that break webhook replay
+        drop_unique_index_if_exists("uploads", "email_normalized_1")
+        drop_unique_index_if_exists("uploads", "username_normalized_1")
+        drop_unique_index_if_exists("payments", "email_normalized_1")
+        drop_unique_index_if_exists("payments", "username_normalized_1")
+
+        db["signups"].create_index([("email_normalized", ASCENDING)])
+        db["signups"].create_index([("username_normalized", ASCENDING)])
+
+        db["username_registry"].create_index([("username_normalized", ASCENDING)], unique=True)
+        db["username_registry"].create_index([("email_normalized", ASCENDING)])
+
+        db["uploads"].create_index([("username_normalized", ASCENDING)])
+        db["uploads"].create_index([("email_normalized", ASCENDING)])
+
+        db["payments"].create_index([("username_normalized", ASCENDING)])
+        db["payments"].create_index([("email_normalized", ASCENDING)])
+        db["payments"].create_index([("payment_date", ASCENDING)])
+
+        db["payment_history"].create_index([("email_normalized", ASCENDING)], unique=True)
+
+        db["signups_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
+        db["uploads_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
+        db["payments_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
+        db["webhook_unresolved"].create_index([("received_at", ASCENDING)])
+        db["webhook_log"].create_index([("received_at", ASCENDING)])
+    except Exception:
+        pass
+
+
+ensure_indexes()
+
+
 def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
     doc = dict(payload or {})
     doc["_id"] = doc_id
@@ -184,7 +218,6 @@ def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dic
 def upsert_username_registry(source: str, email: str, username: str, signup_date: str, lead_source: Any = None) -> None:
     username_normalized = normalize_username(username)
     email_normalized = normalize_email(email)
-
     db["username_registry"].update_one(
         {"username_normalized": username_normalized},
         {
@@ -236,14 +269,63 @@ def signup_lookup(username: str) -> Tuple[Optional[Dict[str, Any]], Optional[str
     return None, f"username not mapped to a signup yet: {uname}"
 
 
-def parse_amount(v: Any) -> Optional[float]:
-    try:
-        amt = float(v)
-        if amt <= 0:
-            return None
-        return amt
-    except Exception:
-        return None
+def classify_payment(history: Optional[Dict[str, Any]], payment_date: str) -> Dict[str, Any]:
+    history = history or {}
+    current_month = month_key(payment_date)
+    paid_months = sorted(set(str(x)[:7] for x in (history.get("paid_months") or []) if str(x).strip()))
+    prev_latest_date = str(history.get("latest_payment_date") or "")[:10]
+    prev_latest_month = month_key(prev_latest_date) if prev_latest_date else ""
+    consecutive_before = int(history.get("consecutive_paid_months") or 0)
+
+    if not paid_months:
+        return {
+            "customer_type": "NEW_CUSTOMER",
+            "lifecycle_label": "NEW_CUSTOMER",
+            "paid_months": [current_month],
+            "paid_months_count": 1,
+            "consecutive_paid_months": 1,
+            "first_ever_payment_date": payment_date,
+            "reactivated": False,
+            "duplicate_month": False,
+        }
+
+    if current_month in paid_months:
+        return {
+            "customer_type": history.get("customer_type") or "RECURRING_CUSTOMER",
+            "lifecycle_label": history.get("lifecycle_label") or "RECURRING_CUSTOMER",
+            "paid_months": paid_months,
+            "paid_months_count": int(history.get("paid_months_count") or len(paid_months)),
+            "consecutive_paid_months": int(history.get("consecutive_paid_months") or consecutive_before or 1),
+            "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
+            "reactivated": bool(history.get("reactivated", False)),
+            "duplicate_month": True,
+        }
+
+    new_paid_months = sorted(set(paid_months + [current_month]))
+    paid_months_count = len(new_paid_months)
+
+    if prev_latest_month and current_month == add_month(prev_latest_month):
+        return {
+            "customer_type": "RECURRING_CUSTOMER",
+            "lifecycle_label": f"RECURRING_CUSTOMER_{paid_months_count}_MONTHS",
+            "paid_months": new_paid_months,
+            "paid_months_count": paid_months_count,
+            "consecutive_paid_months": (consecutive_before or 1) + 1,
+            "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
+            "reactivated": False,
+            "duplicate_month": False,
+        }
+
+    return {
+        "customer_type": "CHURNED_CUSTOMER_RETURNED",
+        "lifecycle_label": f"CHURNED_CUSTOMER_RETURNED_{paid_months_count}_MONTHS_TOTAL",
+        "paid_months": new_paid_months,
+        "paid_months_count": paid_months_count,
+        "consecutive_paid_months": 1,
+        "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
+        "reactivated": True,
+        "duplicate_month": False,
+    }
 
 
 def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
@@ -263,7 +345,7 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
             {"username_normalized": username_normalized},
         ]
     })
-    selector = {"_id": existing["_id"]} if existing else {"email_normalized": email}
+    selector = {"_id": existing["_id"]} if existing else {"username_normalized": username_normalized}
 
     doc = dict(info)
     doc.update({
@@ -290,7 +372,7 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     mirror_doc(
         "signups_webhook",
-        f"signup|{username_normalized}|{signup_date}",
+        username_normalized,
         {
             "source": source,
             "type": "signup",
@@ -322,6 +404,22 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         return unresolved("upload", source, info, err)
 
     email = normalize_email(signup.get("email") or signup.get("email_normalized"))
+    existing = db["uploads"].find_one({
+        "$or": [
+            {"username_normalized": username_normalized},
+            {"email_normalized": email},
+        ]
+    })
+
+    final_upload_date = upload_date
+    final_app_name = app_name
+    if existing:
+        existing_date = str(existing.get("upload_date") or "")[:10]
+        existing_app = str(existing.get("app_name") or existing.get("appname") or "").strip()
+        if existing_date and existing_date <= upload_date:
+            final_upload_date = existing_date
+            if existing_app:
+                final_app_name = existing_app
 
     doc = dict(info)
     doc.update({
@@ -331,22 +429,19 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "email": email,
         "email_normalized": email,
         "signup_date": str(signup.get("signup_date") or "")[:10],
-        "upload_date": upload_date,
-        "app_name": app_name,
+        "upload_date": final_upload_date,
+        "app_name": final_app_name,
         "source": source,
         "final_status": "ACCEPTED",
         "_updated_at": now_iso(),
     })
 
-    db["uploads"].update_one(
-        {"username_normalized": username_normalized},
-        {"$set": doc},
-        upsert=True,
-    )
+    selector = {"_id": existing["_id"]} if existing else {"username_normalized": username_normalized}
+    db["uploads"].update_one(selector, {"$set": doc}, upsert=True)
 
     mirror_doc(
         "uploads_webhook",
-        f"upload|{username_normalized}|{upload_date}|{app_name}",
+        username_normalized,
         {
             "type": "upload",
             "username": username,
@@ -358,61 +453,12 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    return {"ok": True, "email": email, "username": username_normalized, "app_name": app_name}
-
-
-def classify_payment(history: Optional[Dict[str, Any]], payment_date: str) -> Dict[str, Any]:
-    history = history or {}
-    current_month = month_key(payment_date)
-    paid_months = sorted(set(str(x)[:7] for x in (history.get("paid_months") or []) if str(x).strip()))
-    prev_latest_date = str(history.get("latest_payment_date") or "")[:10]
-    prev_latest_month = month_key(prev_latest_date) if prev_latest_date else ""
-    consecutive_before = int(history.get("consecutive_paid_months") or 0)
-
-    if not paid_months:
-        return {
-            "customer_type": "NEW_CUSTOMER",
-            "lifecycle_label": "NEW_CUSTOMER",
-            "paid_months": [current_month],
-            "paid_months_count": 1,
-            "consecutive_paid_months": 1,
-            "first_ever_payment_date": payment_date,
-            "reactivated": False,
-        }
-
-    new_paid_months = sorted(set(paid_months + [current_month]))
-    paid_months_count = len(new_paid_months)
-
-    if current_month in paid_months and prev_latest_date and payment_date <= prev_latest_date:
-        return {
-            "customer_type": history.get("customer_type") or "RECURRING_CUSTOMER",
-            "lifecycle_label": history.get("lifecycle_label") or "RECURRING_CUSTOMER",
-            "paid_months": paid_months,
-            "paid_months_count": int(history.get("paid_months_count") or len(paid_months)),
-            "consecutive_paid_months": consecutive_before or 1,
-            "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
-            "reactivated": bool(history.get("reactivated", False)),
-        }
-
-    if prev_latest_month and current_month == add_month(prev_latest_month):
-        return {
-            "customer_type": "RECURRING_CUSTOMER",
-            "lifecycle_label": f"RECURRING_CUSTOMER_{paid_months_count}_MONTHS",
-            "paid_months": new_paid_months,
-            "paid_months_count": paid_months_count,
-            "consecutive_paid_months": (consecutive_before or 1) + (0 if current_month in paid_months else 1),
-            "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
-            "reactivated": False,
-        }
-
     return {
-        "customer_type": "CHURNED_CUSTOMER_RETURNED",
-        "lifecycle_label": f"CHURNED_CUSTOMER_RETURNED_{paid_months_count}_MONTHS_TOTAL",
-        "paid_months": new_paid_months,
-        "paid_months_count": paid_months_count,
-        "consecutive_paid_months": 1,
-        "first_ever_payment_date": str(history.get("first_ever_payment_date") or payment_date)[:10],
-        "reactivated": True,
+        "ok": True,
+        "email": email,
+        "username": username_normalized,
+        "app_name": final_app_name,
+        "duplicate": bool(existing),
     }
 
 
@@ -444,24 +490,15 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
     history = db["payment_history"].find_one({"email_normalized": email}) or {}
     classification = classify_payment(history, payment_date)
 
-    payment_id = (
-        str(info.get("payment_id") or info.get("invoice_id") or info.get("charge_id") or info.get("id") or "").strip()
-        or f"{username_normalized}|{payment_date}|{amount:.2f}|{subscription}"
-    )
+    existing = db["payments"].find_one({
+        "$or": [
+            {"username_normalized": username_normalized},
+            {"email_normalized": email},
+        ]
+    })
 
-    existing_event = db["payments"].find_one({"_id": payment_id}, {"_id": 1})
-    if existing_event:
-        return {
-            "ok": True,
-            "duplicate": True,
-            "payment_id": payment_id,
-            "email": email,
-            "username": username_normalized,
-        }
-
-    event_doc = dict(info)
-    event_doc.update({
-        "_id": payment_id,
+    doc = dict(info)
+    doc.update({
         "event_type": "payment",
         "email": email,
         "email_normalized": email,
@@ -485,10 +522,20 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "final_status": "ACCEPTED",
         "_updated_at": now_iso(),
     })
-    db["payments"].insert_one(event_doc)
+
+    selector = {"_id": existing["_id"]} if existing else {"username_normalized": username_normalized}
+    db["payments"].update_one(selector, {"$set": doc}, upsert=True)
 
     prev_count = int(history.get("payment_count") or 0)
     prev_revenue = float(history.get("lifetime_revenue_usd") or 0.0)
+
+    if classification["duplicate_month"]:
+        payment_count = prev_count
+        lifetime_revenue = prev_revenue
+    else:
+        payment_count = prev_count + 1
+        lifetime_revenue = round(prev_revenue + amount, 2)
+
     history_doc = {
         "email": email,
         "email_normalized": email,
@@ -498,7 +545,7 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "first_signup_date": str(signup.get("signup_date") or "")[:10],
         "first_ever_payment_date": classification["first_ever_payment_date"],
         "latest_payment_date": payment_date,
-        "payment_count": prev_count + 1,
+        "payment_count": payment_count,
         "paid_months": classification["paid_months"],
         "paid_months_count": classification["paid_months_count"],
         "consecutive_paid_months": classification["consecutive_paid_months"],
@@ -507,7 +554,7 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         "reactivated": classification["reactivated"],
         "last_subscription": subscription,
         "last_amount_usd": amount,
-        "lifetime_revenue_usd": round(prev_revenue + amount, 2),
+        "lifetime_revenue_usd": lifetime_revenue,
         "currency": "USD",
         "final_status": "ACCEPTED",
         "source": source,
@@ -521,9 +568,8 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     mirror_doc(
         "payments_webhook",
-        payment_id,
+        username_normalized,
         {
-            "source": source,
             "type": "payment",
             "username": username,
             "username_normalized": username_normalized,
@@ -544,13 +590,13 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "ok": True,
-        "payment_id": payment_id,
         "email": email,
         "username": username_normalized,
         "customer_type": classification["customer_type"],
         "lifecycle_label": classification["lifecycle_label"],
         "amount": amount,
         "warning": warning,
+        "duplicate": bool(existing or classification["duplicate_month"]),
     }
 
 

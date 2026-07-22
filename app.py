@@ -45,7 +45,7 @@ st.set_page_config(
 
 # ─── Constants ───────────────────────────────────────────────────
 BRAND_NAME = "Eagle 3D Streaming"
-_AUTH_OK = True
+_AUTH_OK = False
 
 NAV_PAGES = [
     ("dashboard", "Dashboard"),
