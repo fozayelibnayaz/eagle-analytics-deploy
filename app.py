@@ -162,6 +162,7 @@ def _inject_css():
     }
 
     .e3-toggle-btn {
+        display: none !important;
         width: 42px; height: 42px;
         border-radius: 12px;
         background: rgba(255,255,255,0.04);
@@ -285,6 +286,7 @@ def _inject_css():
 
     /* ═══════ FLOATING SIDEBAR ═══════ */
     .e3-sidebar {
+        display: none !important;
         position: fixed;
         left: 24px;
         top: 96px;
@@ -1050,7 +1052,7 @@ def _render_dashboard(user_email: str) -> None:
                 title="Revenue Balance",
                 balance=revenue,
                 subtitle=f"{period.label} — {payments} paying customers",
-                holder=(user_email.upper() if user_email else "EAGLE 3D STREAMING"),
+                holder="Eagle Analytics System",
             )
             st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
 

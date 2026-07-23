@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import hashlib
 import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo import MongoClient, ASCENDING
 
-APP = FastAPI(title="Eagle Analytics Webhook API", version="4.0.0")
+APP = FastAPI(title="Eagle Analytics Webhook API", version="5.0.0")
 
 MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 MONGO_DB = os.environ.get("MONGO_DB", "eagle3d").strip()
@@ -120,6 +121,7 @@ def pretty_time(iso_value: str) -> str:
     except Exception:
         return s
 
+
 def kind_label(kind: str) -> str:
     k = str(kind or "").strip().lower()
     return {
@@ -128,9 +130,9 @@ def kind_label(kind: str) -> str:
         "payment": "Payment",
     }.get(k, k or "Unknown")
 
+
 def humanize_error(reason: str) -> str:
     r = str(reason or "").strip()
-
     if "signup missing email" in r:
         return "The sign-up data did not include an email address."
     if "signup missing username" in r:
@@ -148,13 +150,14 @@ def humanize_error(reason: str) -> str:
     if "username not mapped to a signup yet" in r:
         return "This username is not linked to any saved sign-up yet. Please send the sign-up data first or make sure the username already exists in the system."
     if "duplicate key error" in r:
-        return "This record already exists in an older format in the database. The system tried to insert it again instead of updating the existing record."
+        return "This record already exists in the older database structure. The system should update it instead of inserting a duplicate."
     if "internal_processing_error" in r:
-        return "The server received the data, but processing failed internally. Please check the payload fields and the server logs."
+        return "The server received the data, but processing failed internally. Please check the payload and server logs."
     return r[:400]
 
+
 def send_success_alert(source: str, processed: Dict[str, int], results: Dict[str, Any], received_at: str) -> None:
-    success_items = []
+    success_items: List[Dict[str, Any]] = []
     success_items.extend(results.get("signups", []))
     success_items.extend(results.get("uploads", []))
     success_items.extend(results.get("payments", []))
@@ -183,10 +186,10 @@ def send_success_alert(source: str, processed: Dict[str, int], results: Dict[str
         lines.append(f"• Automatic fallback values used: *{len(warnings)}*")
 
     if failed == 0:
-        lines.append("")
-        lines.append("Everything received in this webhook call was handled successfully.")
+        lines += ["", "Everything received in this webhook call was handled successfully."]
 
     send_telegram("\n".join(lines))
+
 
 def send_error_alert(source: str, errors: List[Dict[str, Any]], received_at: str) -> None:
     if not errors:
@@ -221,6 +224,7 @@ def send_error_alert(source: str, errors: List[Dict[str, Any]], received_at: str
 
     send_telegram("\n".join(lines))
 
+
 def require_key(x_api_key: str | None):
     if not WEBHOOK_API_KEY:
         raise HTTPException(status_code=500, detail="WEBHOOK_API_KEY not configured")
@@ -242,7 +246,6 @@ def drop_unique_index_if_exists(coll_name: str, index_name: str) -> None:
 
 def ensure_indexes() -> None:
     try:
-        # remove legacy unique indexes that break webhook replay
         drop_unique_index_if_exists("uploads", "email_normalized_1")
         drop_unique_index_if_exists("uploads", "username_normalized_1")
         drop_unique_index_if_exists("payments", "email_normalized_1")
@@ -266,6 +269,15 @@ def ensure_indexes() -> None:
         db["signups_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
         db["uploads_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
         db["payments_webhook"].create_index([("username_normalized", ASCENDING)], unique=True)
+
+        db["signups_raw_webhook"].create_index([("received_at", ASCENDING)])
+        db["signups_raw_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["uploads_raw_webhook"].create_index([("received_at", ASCENDING)])
+        db["uploads_raw_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["payments_raw_webhook"].create_index([("received_at", ASCENDING)])
+        db["payments_raw_webhook"].create_index([("username_normalized", ASCENDING)])
+        db["payments_raw_webhook"].create_index([("payment_date", ASCENDING)])
+
         db["webhook_unresolved"].create_index([("received_at", ASCENDING)])
         db["webhook_log"].create_index([("received_at", ASCENDING)])
     except Exception:
@@ -280,6 +292,74 @@ def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
     doc["_id"] = doc_id
     doc["received_at"] = now_iso()
     db[collection].update_one({"_id": doc_id}, {"$set": doc}, upsert=True)
+
+
+def raw_event_id(kind: str, source: str, info: Dict[str, Any], resolved_email: str = "", resolved_username: str = "") -> str:
+    explicit = ""
+    for k in ("uid", "id", "event_id", "signup_id", "upload_id", "payment_id", "invoice_id", "charge_id"):
+        v = str(info.get(k) or "").strip()
+        if v:
+            explicit = v
+            break
+    if explicit:
+        return f"{kind}|{source}|{explicit}"
+
+    username = normalize_username(info.get("username") or resolved_username)
+    email = normalize_email(info.get("email") or resolved_email)
+    day = pick_day(
+        info.get("signup_date"),
+        info.get("upload_date"),
+        info.get("payment_date"),
+        info.get("first_payment_date"),
+        info.get("created_at"),
+        info.get("date"),
+    )
+    payload_key = {
+        "source": source,
+        "type": kind,
+        "username": username,
+        "email": email,
+        "lead_source": info.get("lead_source"),
+        "signup_date": info.get("signup_date"),
+        "upload_date": info.get("upload_date"),
+        "payment_date": info.get("payment_date"),
+        "appname": info.get("app_name") or info.get("appname"),
+        "amount": info.get("amount"),
+        "subscription": info.get("subscription") or info.get("plan") or info.get("product"),
+        "day": day,
+    }
+    digest = hashlib.sha1(json.dumps(payload_key, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return f"{kind}|{digest}"
+
+
+def write_raw_event(kind: str, source: str, info: Dict[str, Any], resolved_email: str = "", resolved_username: str = "", extra: Optional[Dict[str, Any]] = None) -> str:
+    collection_map = {
+        "signup": "signups_raw_webhook",
+        "upload": "uploads_raw_webhook",
+        "payment": "payments_raw_webhook",
+    }
+    collection = collection_map[kind]
+    username = str(info.get("username") or resolved_username or "").strip()
+    email = normalize_email(info.get("email") or resolved_email)
+
+    raw_id = raw_event_id(kind, source, info, resolved_email=email, resolved_username=username)
+
+    doc = dict(info or {})
+    doc.update({
+        "_id": raw_id,
+        "type": kind,
+        "source": source,
+        "username": username,
+        "username_normalized": normalize_username(username),
+        "email": email,
+        "email_normalized": email,
+        "received_at": now_iso(),
+    })
+    if extra:
+        doc.update(extra)
+
+    db[collection].update_one({"_id": raw_id}, {"$set": doc}, upsert=True)
+    return raw_id
 
 
 def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -466,6 +546,15 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
+    write_raw_event(
+        "signup",
+        source,
+        info,
+        resolved_email=email,
+        resolved_username=username,
+        extra={"signup_date": signup_date, "lead_source": info.get("lead_source")},
+    )
+
     return {"ok": True, "email": email, "username": username_normalized}
 
 
@@ -531,7 +620,17 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
             "email_normalized": email,
             "appname": app_name,
             "upload_date": upload_date,
+            "received_at": now_iso(),
         },
+    )
+
+    write_raw_event(
+        "upload",
+        source,
+        info,
+        resolved_email=email,
+        resolved_username=username,
+        extra={"appname": app_name, "upload_date": upload_date},
     )
 
     return {
@@ -662,6 +761,21 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
             "currency": "USD",
             "customer_type": classification["customer_type"],
             "lifecycle_label": classification["lifecycle_label"],
+            "received_at": now_iso(),
+        },
+    )
+
+    write_raw_event(
+        "payment",
+        source,
+        info,
+        resolved_email=email,
+        resolved_username=username,
+        extra={
+            "amount": amount,
+            "subscription": subscription,
+            "payment_date": payment_date,
+            "currency": "USD",
         },
     )
 
