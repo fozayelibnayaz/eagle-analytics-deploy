@@ -322,7 +322,8 @@ def write_raw_event(kind: str, source: str, info: Dict[str, Any], resolved_email
     doc = dict(info or {})
     doc.update({
         "_id": raw_id,
-        "event_uid": event_uid,
+        "raw_id": raw_id,
+        "event_uid": event_uid or "",
         "type": kind,
         "source": source,
         "username": username,

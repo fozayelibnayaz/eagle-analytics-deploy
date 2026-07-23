@@ -216,7 +216,7 @@ def _render_browse_data() -> None:
                 unsafe_allow_html=True)
     st.caption(
         "Processed Data = unique sign-up, first project upload, customer payment summary. "
-        "Raw Event Data = webhook events deduped by event id when provided, otherwise by exact payload fingerprint. "
+        "Raw Event Data = every received webhook event stored separately. "
         "Webhook Call Log = every webhook API call received."
     )
 
@@ -279,7 +279,7 @@ def _render_browse_data() -> None:
 
     raw_cols_map = {
         "signups": [
-            "_id",
+            "raw_id",
             "event_uid",
             "username",
             "email",
@@ -290,7 +290,7 @@ def _render_browse_data() -> None:
             "received_at",
         ],
         "uploads": [
-            "_id",
+            "raw_id",
             "event_uid",
             "username",
             "appname",
@@ -301,7 +301,7 @@ def _render_browse_data() -> None:
             "received_at",
         ],
         "payments": [
-            "_id",
+            "raw_id",
             "event_uid",
             "username",
             "amount",
