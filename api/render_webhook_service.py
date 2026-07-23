@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import hashlib
+import uuid
 import urllib.request
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -13,7 +13,7 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo import MongoClient, ASCENDING
 
-APP = FastAPI(title="Eagle Analytics Webhook API", version="5.0.0")
+APP = FastAPI(title="Eagle Analytics Webhook API", version="6.0.0")
 
 MONGO_URI = os.environ.get("MONGO_URI", "").strip()
 MONGO_DB = os.environ.get("MONGO_DB", "eagle3d").strip()
@@ -89,28 +89,6 @@ def parse_amount(v: Any) -> Optional[float]:
         return None
 
 
-def send_telegram(msg: str) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-    try:
-        payload = json.dumps({
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": msg,
-            "parse_mode": "Markdown",
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode())
-            return bool(body.get("ok"))
-    except Exception:
-        return False
-
-
 def pretty_time(iso_value: str) -> str:
     s = str(iso_value or "").strip()
     if not s:
@@ -154,6 +132,28 @@ def humanize_error(reason: str) -> str:
     if "internal_processing_error" in r:
         return "The server received the data, but processing failed internally. Please check the payload and server logs."
     return r[:400]
+
+
+def send_telegram(msg: str) -> bool:
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return False
+    try:
+        payload = json.dumps({
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": msg,
+            "parse_mode": "Markdown",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode())
+            return bool(body.get("ok"))
+    except Exception:
+        return False
 
 
 def send_success_alert(source: str, processed: Dict[str, int], results: Dict[str, Any], received_at: str) -> None:
@@ -294,42 +294,16 @@ def mirror_doc(collection: str, doc_id: str, payload: Dict[str, Any]) -> None:
     db[collection].update_one({"_id": doc_id}, {"$set": doc}, upsert=True)
 
 
-def raw_event_id(kind: str, source: str, info: Dict[str, Any], resolved_email: str = "", resolved_username: str = "") -> str:
-    explicit = ""
+def extract_event_uid(info: Dict[str, Any]) -> str:
     for k in ("uid", "id", "event_id", "signup_id", "upload_id", "payment_id", "invoice_id", "charge_id"):
-        v = str(info.get(k) or "").strip()
+        v = str((info or {}).get(k) or "").strip()
         if v:
-            explicit = v
-            break
-    if explicit:
-        return f"{kind}|{source}|{explicit}"
+            return v
+    return ""
 
-    username = normalize_username(info.get("username") or resolved_username)
-    email = normalize_email(info.get("email") or resolved_email)
-    day = pick_day(
-        info.get("signup_date"),
-        info.get("upload_date"),
-        info.get("payment_date"),
-        info.get("first_payment_date"),
-        info.get("created_at"),
-        info.get("date"),
-    )
-    payload_key = {
-        "source": source,
-        "type": kind,
-        "username": username,
-        "email": email,
-        "lead_source": info.get("lead_source"),
-        "signup_date": info.get("signup_date"),
-        "upload_date": info.get("upload_date"),
-        "payment_date": info.get("payment_date"),
-        "appname": info.get("app_name") or info.get("appname"),
-        "amount": info.get("amount"),
-        "subscription": info.get("subscription") or info.get("plan") or info.get("product"),
-        "day": day,
-    }
-    digest = hashlib.sha1(json.dumps(payload_key, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
-    return f"{kind}|{digest}"
+
+def raw_row_id(kind: str, source: str) -> str:
+    return f"{kind}|{source}|{now_iso()}|{uuid.uuid4().hex}"
 
 
 def write_raw_event(kind: str, source: str, info: Dict[str, Any], resolved_email: str = "", resolved_username: str = "", extra: Optional[Dict[str, Any]] = None) -> str:
@@ -339,14 +313,16 @@ def write_raw_event(kind: str, source: str, info: Dict[str, Any], resolved_email
         "payment": "payments_raw_webhook",
     }
     collection = collection_map[kind]
+
     username = str(info.get("username") or resolved_username or "").strip()
     email = normalize_email(info.get("email") or resolved_email)
-
-    raw_id = raw_event_id(kind, source, info, resolved_email=email, resolved_username=username)
+    event_uid = extract_event_uid(info)
+    raw_id = raw_row_id(kind, source)
 
     doc = dict(info or {})
     doc.update({
         "_id": raw_id,
+        "event_uid": event_uid,
         "type": kind,
         "source": source,
         "username": username,
@@ -354,12 +330,33 @@ def write_raw_event(kind: str, source: str, info: Dict[str, Any], resolved_email
         "email": email,
         "email_normalized": email,
         "received_at": now_iso(),
+        "processing_status": "RECEIVED",
+        "processing_error": "",
     })
     if extra:
         doc.update(extra)
 
-    db[collection].update_one({"_id": raw_id}, {"$set": doc}, upsert=True)
+    db[collection].insert_one(doc)
     return raw_id
+
+
+def update_raw_event_status(kind: str, raw_id: str, ok: bool, error: str = "", extra: Optional[Dict[str, Any]] = None) -> None:
+    collection_map = {
+        "signup": "signups_raw_webhook",
+        "upload": "uploads_raw_webhook",
+        "payment": "payments_raw_webhook",
+    }
+    collection = collection_map[kind]
+
+    payload = {
+        "processing_status": "PROCESSED" if ok else "FAILED",
+        "processing_error": str(error or ""),
+        "processed_at": now_iso(),
+    }
+    if extra:
+        payload.update(extra)
+
+    db[collection].update_one({"_id": raw_id}, {"$set": payload})
 
 
 def unresolved(kind: str, source: str, info: Dict[str, Any], reason: str) -> Dict[str, Any]:
@@ -546,15 +543,6 @@ def upsert_signup(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    write_raw_event(
-        "signup",
-        source,
-        info,
-        resolved_email=email,
-        resolved_username=username,
-        extra={"signup_date": signup_date, "lead_source": info.get("lead_source")},
-    )
-
     return {"ok": True, "email": email, "username": username_normalized}
 
 
@@ -622,15 +610,6 @@ def upsert_upload(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
             "upload_date": upload_date,
             "received_at": now_iso(),
         },
-    )
-
-    write_raw_event(
-        "upload",
-        source,
-        info,
-        resolved_email=email,
-        resolved_username=username,
-        extra={"appname": app_name, "upload_date": upload_date},
     )
 
     return {
@@ -765,20 +744,6 @@ def upsert_payment(source: str, info: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    write_raw_event(
-        "payment",
-        source,
-        info,
-        resolved_email=email,
-        resolved_username=username,
-        extra={
-            "amount": amount,
-            "subscription": subscription,
-            "payment_date": payment_date,
-            "currency": "USD",
-        },
-    )
-
     warning = None
     if not any(info.get(k) for k in ("payment_date", "first_payment_date", "paid_at", "created_at", "date")):
         warning = f"payment_date missing in payload; defaulted to {payment_date}"
@@ -873,45 +838,106 @@ def webhook(payload: WebhookPayload, x_api_key: str | None = Header(default=None
     for item in payload.data:
         kind = str(item.type or "").strip().lower()
         info = dict(item.info or {})
+        raw_id = None
 
         try:
+            if kind == "signup":
+                raw_id = write_raw_event(
+                    "signup",
+                    source,
+                    info,
+                    resolved_email=normalize_email(info.get("email")),
+                    resolved_username=str(info.get("username") or "").strip(),
+                    extra={"signup_date": pick_day(info.get("signup_date"), info.get("created_at"), info.get("date"))},
+                )
+            elif kind == "upload":
+                raw_id = write_raw_event(
+                    "upload",
+                    source,
+                    info,
+                    resolved_username=str(info.get("username") or "").strip(),
+                    extra={
+                        "appname": str(info.get("app_name") or info.get("appname") or "").strip(),
+                        "upload_date": pick_day(info.get("upload_date"), info.get("created_at"), info.get("date")),
+                    },
+                )
+            elif kind == "payment":
+                raw_id = write_raw_event(
+                    "payment",
+                    source,
+                    info,
+                    resolved_username=str(info.get("username") or "").strip(),
+                    extra={
+                        "amount": info.get("amount"),
+                        "subscription": str(info.get("subscription") or info.get("plan") or info.get("product") or "").strip(),
+                        "payment_date": pick_day(
+                            info.get("payment_date"),
+                            info.get("first_payment_date"),
+                            info.get("paid_at"),
+                            info.get("created_at"),
+                            info.get("date"),
+                        ),
+                    },
+                )
+
             if kind == "signup":
                 res = upsert_signup(source, info)
                 if res.get("ok"):
                     processed["signups"] += 1
                     results["signups"].append(res)
+                    if raw_id:
+                        update_raw_event_status("signup", raw_id, True, extra={"processed_kind": "signup"})
                 else:
                     results["errors"].append(res)
+                    if raw_id:
+                        update_raw_event_status("signup", raw_id, False, res.get("error", ""), extra={"processed_kind": "signup"})
 
             elif kind == "upload":
                 res = upsert_upload(source, info)
                 if res.get("ok"):
                     processed["uploads"] += 1
                     results["uploads"].append(res)
+                    if raw_id:
+                        update_raw_event_status("upload", raw_id, True, extra={"processed_kind": "upload"})
                 else:
                     results["errors"].append(res)
+                    if raw_id:
+                        update_raw_event_status("upload", raw_id, False, res.get("error", ""), extra={"processed_kind": "upload"})
 
             elif kind == "payment":
                 res = upsert_payment(source, info)
                 if res.get("ok"):
                     processed["payments"] += 1
                     results["payments"].append(res)
+                    if raw_id:
+                        update_raw_event_status("payment", raw_id, True, extra={"processed_kind": "payment"})
                 else:
                     results["errors"].append(res)
+                    if raw_id:
+                        update_raw_event_status("payment", raw_id, False, res.get("error", ""), extra={"processed_kind": "payment"})
+
             else:
-                results["errors"].append({
+                err = {
                     "ok": False,
                     "kind": kind,
                     "error": f"unknown type: {kind}",
                     "info": info,
-                })
+                }
+                results["errors"].append(err)
+
         except Exception as e:
-            results["errors"].append({
+            err = {
                 "ok": False,
                 "kind": kind,
                 "error": f"internal_processing_error: {e}",
                 "info": info,
-            })
+            }
+            results["errors"].append(err)
+            if raw_id and kind in ("signup", "upload", "payment"):
+                try:
+                    update_raw_event_status(kind, raw_id, False, err["error"])
+                except Exception:
+                    pass
 
     received_at = now_iso()
     log_doc = {

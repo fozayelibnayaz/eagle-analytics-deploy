@@ -279,25 +279,37 @@ def _render_browse_data() -> None:
 
     raw_cols_map = {
         "signups": [
+            "_id",
+            "event_uid",
             "username",
             "email",
             "lead_source",
             "signup_date",
+            "processing_status",
+            "processing_error",
             "received_at",
         ],
         "uploads": [
+            "_id",
+            "event_uid",
             "username",
             "appname",
             "upload_date",
             "email",
+            "processing_status",
+            "processing_error",
             "received_at",
         ],
         "payments": [
+            "_id",
+            "event_uid",
             "username",
             "amount",
             "subscription",
             "payment_date",
             "email",
+            "processing_status",
+            "processing_error",
             "received_at",
         ],
     }
