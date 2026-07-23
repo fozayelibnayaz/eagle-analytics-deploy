@@ -211,32 +211,78 @@ def _render_kpi_dashboard(user_email: str) -> None:
 
 
 def _render_browse_data() -> None:
-    """Browse webhook-shaped data only."""
+    """Browse processed data, raw webhook data, and webhook call log."""
     st.markdown('<p class="e3-section-title">Browse & Edit Data</p>',
                 unsafe_allow_html=True)
-    st.caption("Shows webhook-formatted records only. Changes save to MongoDB in real-time and are audit-logged.")
-
-    source = st.selectbox(
-        "Source",
-        ["signups", "uploads", "payments"],
-        key="browse_source_edit",
+    st.caption(
+        "Processed Data = unique sign-up, first project upload, customer payment summary. "
+        "Raw Event Data = webhook events deduped by event id when provided, otherwise by exact payload fingerprint. "
+        "Webhook Call Log = every webhook API call received."
     )
 
     user_email = st.session_state.get("user_email", "")
 
-    collection_map = {
-        "signups": "signups_webhook",
-        "uploads": "uploads_webhook",
-        "payments": "payments_webhook",
+    processed_tab, raw_tab, log_tab = st.tabs([
+        "✅ Processed Data",
+        "🗃 Raw Event Data",
+        "🧾 Webhook Call Log",
+    ])
+
+    processed_collection_map = {
+        "signups": "signups",
+        "uploads": "uploads",
+        "payments": "payment_history",
     }
 
-    display_cols_map = {
+    processed_cols_map = {
+        "signups": [
+            "username_normalized",
+            "email_normalized",
+            "lead_source",
+            "signup_date",
+            "source",
+            "final_status",
+            "_updated_at",
+        ],
+        "uploads": [
+            "username_normalized",
+            "email_normalized",
+            "app_name",
+            "signup_date",
+            "upload_date",
+            "source",
+            "final_status",
+            "_updated_at",
+        ],
+        "payments": [
+            "username_normalized",
+            "email_normalized",
+            "first_ever_payment_date",
+            "latest_payment_date",
+            "payment_count",
+            "paid_months_count",
+            "consecutive_paid_months",
+            "last_subscription",
+            "last_amount_usd",
+            "lifetime_revenue_usd",
+            "customer_type",
+            "lifecycle_label",
+            "_updated_at",
+        ],
+    }
+
+    raw_collection_map = {
+        "signups": "signups_raw_webhook",
+        "uploads": "uploads_raw_webhook",
+        "payments": "payments_raw_webhook",
+    }
+
+    raw_cols_map = {
         "signups": [
             "username",
             "email",
             "lead_source",
             "signup_date",
-            "source",
             "received_at",
         ],
         "uploads": [
@@ -251,24 +297,56 @@ def _render_browse_data() -> None:
             "amount",
             "subscription",
             "payment_date",
-            "customer_type",
-            "lifecycle_label",
             "email",
-            "source",
             "received_at",
         ],
     }
 
-    render_editable_table(
-        collection=collection_map.get(source, source),
-        user_email=user_email,
-        key_field="_id",
-        display_columns=display_cols_map.get(source),
-        max_rows=500,
-    )
+    with processed_tab:
+        source = st.selectbox(
+            "Processed source",
+            ["signups", "uploads", "payments"],
+            key="browse_processed_source",
+        )
+        render_editable_table(
+            collection=processed_collection_map[source],
+            user_email=user_email,
+            key_field="_id",
+            display_columns=processed_cols_map[source],
+            max_rows=500,
+        )
+
+    with raw_tab:
+        source = st.selectbox(
+            "Raw event source",
+            ["signups", "uploads", "payments"],
+            key="browse_raw_source",
+        )
+        render_editable_table(
+            collection=raw_collection_map[source],
+            user_email=user_email,
+            key_field="_id",
+            display_columns=raw_cols_map[source],
+            max_rows=500,
+        )
+
+    with log_tab:
+        render_editable_table(
+            collection="webhook_log",
+            user_email=user_email,
+            key_field="_id",
+            display_columns=[
+                "source",
+                "processed",
+                "errors_count",
+                "received_at",
+            ],
+            max_rows=500,
+        )
 
     with st.expander("📋 Recent edits audit log"):
         render_audit_log(user_email=user_email, limit=30)
+
 
 def _render_eda_lab() -> None:
     """Exploratory Data Analysis."""
@@ -277,7 +355,7 @@ def _render_eda_lab() -> None:
     st.caption("Exploratory data analysis with custom charts")
 
     source = st.selectbox("Source collection",
-                          ["signups", "uploads", "payments", "daily_kpis"],
+                          ["signups", "uploads", "payments", "signups_raw_webhook", "uploads_raw_webhook", "payments_raw_webhook", "payment_history", "webhook_log", "daily_kpis"],
                           key="eda_source")
     chart_type = st.selectbox("Chart type",
                                ["Bar", "Histogram", "Box", "Scatter", "Line"],
