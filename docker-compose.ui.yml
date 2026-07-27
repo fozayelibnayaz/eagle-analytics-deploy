@@ -1,0 +1,11 @@
+services:
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: eagle-analytics-ui
+    restart: unless-stopped
+    ports:
+      - "18501:8501"
+    volumes:
+      - ./.streamlit:/app/.streamlit:ro
