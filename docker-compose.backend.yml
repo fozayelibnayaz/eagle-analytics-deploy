@@ -8,7 +8,7 @@ services:
     env_file:
       - .env.backend
     ports:
-      - "8000:8000"
+      - "18000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s

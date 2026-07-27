@@ -1,0 +1,78 @@
+name: Deploy Backend to US Sales Machine
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "api/**"
+      - "Dockerfile.api"
+      - "docker-compose.backend.yml"
+      - ".github/workflows/deploy-backend-selfhosted.yml"
+      - "pages_registry.py"
+      - "app.py"
+      - "ui_helpers.py"
+      - "mongo_client.py"
+      - "requirements.txt"
+      - "api/requirements-render.txt"
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, windows, backend, sales-machine]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write backend env file
+        shell: powershell
+        run: |
+          @"
+          MONGO_URI=${{ secrets.MONGO_URI }}
+          MONGO_DB=${{ secrets.MONGO_DB }}
+          WEBHOOK_API_KEY=${{ secrets.WEBHOOK_API_KEY }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          "@ | Set-Content .env.backend
+
+      - name: Show working directory
+        shell: powershell
+        run: |
+          Get-Location
+          Get-ChildItem
+
+      - name: Stop old stack if exists
+        shell: powershell
+        run: |
+          try {
+            docker compose -f docker-compose.backend.yml --env-file .env.backend down
+          } catch {
+            Write-Host "No old stack to stop or down failed harmlessly."
+          }
+
+      - name: Build backend
+        shell: powershell
+        run: |
+          docker compose -f docker-compose.backend.yml --env-file .env.backend build --no-cache
+
+      - name: Start backend
+        shell: powershell
+        run: |
+          docker compose -f docker-compose.backend.yml --env-file .env.backend up -d
+
+      - name: Show container status
+        shell: powershell
+        run: |
+          docker compose -f docker-compose.backend.yml --env-file .env.backend ps
+
+      - name: Show logs
+        shell: powershell
+        run: |
+          docker compose -f docker-compose.backend.yml --env-file .env.backend logs --tail=120 api
+
+      - name: Local health check
+        shell: powershell
+        run: |
+          Start-Sleep -Seconds 8
+          Invoke-RestMethod -Uri "http://127.0.0.1:18000/health" -Method Get | ConvertTo-Json -Depth 5
