@@ -5,21 +5,10 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "api/**"
-      - "Dockerfile.api"
-      - "docker-compose.backend.yml"
-      - ".github/workflows/deploy-backend-selfhosted.yml"
-      - "pages_registry.py"
-      - "app.py"
-      - "ui_helpers.py"
-      - "mongo_client.py"
-      - "requirements.txt"
-      - "api/requirements-render.txt"
 
 jobs:
   deploy:
-    runs-on: [self-hosted, windows, backend, sales-machine]
+    runs-on: [self-hosted, windows]
 
     steps:
       - name: Checkout
@@ -36,19 +25,13 @@ jobs:
           TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
           "@ | Set-Content .env.backend
 
-      - name: Show working directory
-        shell: powershell
-        run: |
-          Get-Location
-          Get-ChildItem
-
       - name: Stop old stack if exists
         shell: powershell
         run: |
           try {
             docker compose -f docker-compose.backend.yml --env-file .env.backend down
           } catch {
-            Write-Host "No old stack to stop or down failed harmlessly."
+            Write-Host "No previous stack to stop."
           }
 
       - name: Build backend
